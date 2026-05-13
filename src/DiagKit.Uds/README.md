@@ -1,7 +1,7 @@
 # DiagKit.Uds
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
-[![NuGet](https://img.shields.io/badge/NuGet-3.0.0-orange.svg)](https://www.nuget.org/packages/DiagKit.Uds)
+[![NuGet](https://img.shields.io/nuget/v/DiagKit.Uds?label=NuGet&color=orange)](https://www.nuget.org/packages/DiagKit.Uds)
 [![.NET](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/)
 
 A self-contained .NET library implementing **UDS** (Unified Diagnostic Services,
@@ -56,7 +56,7 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
 ## Installation
 
 ```bash
-dotnet add package DiagKit.Uds --version 3.0.0
+dotnet add package DiagKit.Uds
 ```
 
 Or reference the project directly:
