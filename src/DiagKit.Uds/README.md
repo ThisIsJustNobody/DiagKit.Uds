@@ -133,6 +133,19 @@ bool unlocked = await SecurityAccess.UnlockAsync(client,
     });
 ```
 
+CANoe SeedKey DLLs that export `GenerateKeyEx` or `GenerateKeyExOpt` can be
+loaded without dynamic compilation:
+
+```csharp
+using var keyGenerator = new CanoeSeedKeyGenerator(@"C:\SeedKey\SeedKey.dll");
+bool unlocked = await SecurityAccess.UnlockAsync(client, 0x01, keyGenerator);
+
+// Or let the library choose the DLL path matching the current process.
+using var archGenerator = CanoeSeedKeyGenerator.LoadForCurrentProcess(
+    x86Path: @"C:\SeedKey\x86\SeedKey.dll",
+    x64Path: @"C:\SeedKey\x64\SeedKey.dll");
+```
+
 ### 5. TesterPresent keep-alive
 
 ```csharp

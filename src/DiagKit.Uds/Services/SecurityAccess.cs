@@ -12,7 +12,8 @@ namespace DiagKit.Uds.Services;
 /// SID 0x27（SecurityAccess/安全访问）辅助方法。<br/>Helpers for SID 0x27 SecurityAccess.
 /// </summary>
 /// <remarks>
-/// 调用方提供种子到密钥的转换委托，不执行任何动态编译。<br/>The caller supplies a seed-to-key transformation delegate; no dynamic compilation is performed.
+/// 调用方可提供种子到密钥的转换委托，或使用 CANoe SeedKey DLL 生成 key；不执行任何动态编译。<br/>
+/// The caller can provide a seed-to-key transformation delegate or use a CANoe SeedKey DLL; no dynamic compilation is performed.
 /// </remarks>
 public static class SecurityAccess
 {
@@ -79,6 +80,63 @@ public static class SecurityAccess
         if (keyResp.Length < 2 || keyResp.Span[0] != 0x67 || keyResp.Span[1] != sendKeyLevel)
             throw new ProtocolException("Unexpected SecurityAccess key response.");
         return true;
+    }
+
+    /// <summary>
+    /// 使用 CANoe SeedKey DLL 执行完整的 requestSeed / sendKey 交换流程。<br/>
+    /// Performs the full requestSeed / sendKey exchange using a CANoe SeedKey DLL.
+    /// </summary>
+    /// <param name="client">UDS 异步客户端。<br/>The UDS async client.</param>
+    /// <param name="requestSeedLevel">requestSeed 子功能级别（必须为奇数）。<br/>The requestSeed sub-function level (must be odd).</param>
+    /// <param name="keyGenerator">CANoe SeedKey DLL 生成器。<br/>CANoe SeedKey DLL generator.</param>
+    /// <param name="cancellationToken">取消令牌。<br/>Cancellation token.</param>
+    /// <returns>解锁成功时返回 <see langword="true"/>。<br/><see langword="true"/> when unlocked successfully.</returns>
+    public static Task<bool> UnlockAsync(
+        IAsyncUdsClient client,
+        byte requestSeedLevel,
+        CanoeSeedKeyGenerator keyGenerator,
+        CancellationToken cancellationToken = default)
+        => UnlockAsync(client, requestSeedLevel, keyGenerator, (uint)requestSeedLevel, null, cancellationToken);
+
+    /// <summary>
+    /// 使用 CANoe SeedKey DLL 与指定调用选项执行完整的 requestSeed / sendKey 交换流程。<br/>
+    /// Performs the full requestSeed / sendKey exchange using a CANoe SeedKey DLL and the specified call options.
+    /// </summary>
+    /// <param name="client">UDS 异步客户端。<br/>The UDS async client.</param>
+    /// <param name="requestSeedLevel">requestSeed 子功能级别（必须为奇数）。<br/>The requestSeed sub-function level (must be odd).</param>
+    /// <param name="keyGenerator">CANoe SeedKey DLL 生成器。<br/>CANoe SeedKey DLL generator.</param>
+    /// <param name="keyOptions">CANoe SeedKey DLL 调用选项。<br/>CANoe SeedKey DLL call options.</param>
+    /// <param name="cancellationToken">取消令牌。<br/>Cancellation token.</param>
+    /// <returns>解锁成功时返回 <see langword="true"/>。<br/><see langword="true"/> when unlocked successfully.</returns>
+    public static Task<bool> UnlockAsync(
+        IAsyncUdsClient client,
+        byte requestSeedLevel,
+        CanoeSeedKeyGenerator keyGenerator,
+        CanoeSeedKeyOptions? keyOptions,
+        CancellationToken cancellationToken = default)
+        => UnlockAsync(client, requestSeedLevel, keyGenerator, (uint)requestSeedLevel, keyOptions, cancellationToken);
+
+    /// <summary>
+    /// 使用 CANoe SeedKey DLL、显式安全等级与指定调用选项执行完整的 requestSeed / sendKey 交换流程。<br/>
+    /// Performs the full requestSeed / sendKey exchange using a CANoe SeedKey DLL, explicit security level, and call options.
+    /// </summary>
+    /// <param name="client">UDS 异步客户端。<br/>The UDS async client.</param>
+    /// <param name="requestSeedLevel">requestSeed 子功能级别（必须为奇数）。<br/>The requestSeed sub-function level (must be odd).</param>
+    /// <param name="keyGenerator">CANoe SeedKey DLL 生成器。<br/>CANoe SeedKey DLL generator.</param>
+    /// <param name="securityLevel">传给 CANoe DLL 的安全访问等级。<br/>Security access level passed to the CANoe DLL.</param>
+    /// <param name="keyOptions">CANoe SeedKey DLL 调用选项。<br/>CANoe SeedKey DLL call options.</param>
+    /// <param name="cancellationToken">取消令牌。<br/>Cancellation token.</param>
+    /// <returns>解锁成功时返回 <see langword="true"/>。<br/><see langword="true"/> when unlocked successfully.</returns>
+    public static Task<bool> UnlockAsync(
+        IAsyncUdsClient client,
+        byte requestSeedLevel,
+        CanoeSeedKeyGenerator keyGenerator,
+        uint securityLevel,
+        CanoeSeedKeyOptions? keyOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(keyGenerator);
+        return UnlockAsync(client, requestSeedLevel, seed => keyGenerator.GenerateKey(seed, securityLevel, keyOptions), cancellationToken);
     }
 
     private static bool IsAllZero(ReadOnlySpan<byte> buf)
