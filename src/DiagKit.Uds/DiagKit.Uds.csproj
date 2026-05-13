@@ -29,6 +29,7 @@
 
     <!-- 包内容 -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>diagkit-uds.png</PackageIcon>
 
     <!-- 发布 -->
     <PackageReleaseNotes>Initial release.</PackageReleaseNotes>
@@ -47,6 +48,7 @@
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\diagkit-uds.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
