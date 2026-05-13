@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 编译 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+
+    <!-- 版本 -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>1.0</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- 包元数据 -->
+    <Authors>Eric YaRu YANG</Authors>
+    <Title>UDS / DoCAN / DoIP Protocol Library</Title>
+    <Description>A self-contained .NET library implementing UDS (ISO 14229) over DoCAN (ISO 15765) and DoIP (ISO 13400) for automotive ECU diagnostics. No external dependencies.</Description>
+    <Copyright>Copyright (c) 2025-2026 Eric YaRu YANG</Copyright>
+    <PackageTags>UDS;DoCAN;DoIP;ISO14229;ISO15765;ISO13400;automotive;diagnostics</PackageTags>
+
+    <!-- 许可 -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+    <!-- 包内容 -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- 发布 -->
+    <PackageReleaseNotes>Initial release.</PackageReleaseNotes>
+
+    <!-- URL -->
+    <PackageProjectUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- Source Link + 符号 -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+
+</Project>
