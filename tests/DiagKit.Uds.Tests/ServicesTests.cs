@@ -153,6 +153,47 @@ public class ServicesTests
     }
 
     [TestMethod]
+    public async Task SecurityAccess_UnlockAsync_UsesCanoeSeedKeyGenerator()
+    {
+        var client = new StubAsyncUdsClient(
+            new byte[] { 0x67, 0x01, 0x12, 0x34 },
+            new byte[] { 0x67, 0x02 });
+        var seenSecurityLevel = 0u;
+        CanoeSeedKeyGenerator.GenerateKeyExCallback generateKeyEx = (
+            byte[] seed,
+            uint seedSize,
+            uint securityLevel,
+            byte[] _,
+            byte[] key,
+            uint keySize,
+            out uint actualKeySize) =>
+        {
+            seenSecurityLevel = securityLevel;
+            Assert.AreEqual(2u, seedSize);
+            Assert.AreEqual(2u, keySize);
+            CollectionAssert.AreEqual(new byte[] { 0x12, 0x34 }, seed);
+
+            key[0] = 0xED;
+            key[1] = 0xCB;
+            actualKeySize = 2;
+            return CanoeKeyGenerationResult.Ok;
+        };
+        using var generator = new CanoeSeedKeyGenerator(generateKeyEx, null);
+
+        var ok = await SecurityAccess.UnlockAsync(
+            client,
+            0x01,
+            generator,
+            securityLevel: 0x05,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual(0x05u, seenSecurityLevel);
+        CollectionAssert.AreEqual(new byte[] { 0x27, 0x01 }, client.Requests[0]);
+        CollectionAssert.AreEqual(new byte[] { 0x27, 0x02, 0xED, 0xCB }, client.Requests[1]);
+    }
+
+    [TestMethod]
     public void ReadDtcInformation_ParseDtcByStatusMask_ReturnsRecords()
     {
         var records = ReadDtcInformation.ParseDtcByStatusMask(

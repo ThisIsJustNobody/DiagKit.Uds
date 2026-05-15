@@ -123,6 +123,19 @@ bool unlocked = await SecurityAccess.UnlockAsync(client,
     });
 ```
 
+对于导出 `GenerateKeyEx` 或 `GenerateKeyExOpt` 的 CANoe SeedKey DLL，可直接加载，
+不需要动态编译：
+
+```csharp
+using var keyGenerator = new CanoeSeedKeyGenerator(@"C:\SeedKey\SeedKey.dll");
+bool unlocked = await SecurityAccess.UnlockAsync(client, 0x01, keyGenerator);
+
+// 或让库按当前进程架构选择 DLL 路径。
+using var archGenerator = CanoeSeedKeyGenerator.LoadForCurrentProcess(
+    x86Path: @"C:\SeedKey\x86\SeedKey.dll",
+    x64Path: @"C:\SeedKey\x64\SeedKey.dll");
+```
+
 ### 5. TesterPresent 心跳保活
 
 ```csharp
