@@ -1,0 +1,9 @@
+# Local mapping for CANoe SeedKey DLL tests.
+# Copy this file outside the repository or to the external resource directory as
+# SeedKeyDllTestFiles.local.map, then replace values with local paths.
+# Do not commit real DLL names or real local paths.
+# Values may be absolute paths or paths relative to this mapping file.
+
+SeedKeyDllx86TestFile1=<path-to-local-x86-dll>
+SeedKeyDllx64TestFile1=<path-to-local-x64-dll-1>
+SeedKeyDllx64TestFile2=<path-to-local-x64-dll-2>

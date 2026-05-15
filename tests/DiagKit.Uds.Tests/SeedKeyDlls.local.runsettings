@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <TestRunParameters>
+    <Parameter name="SeedKeyDllTestsEnabled" value="true" />
+    <Parameter name="SeedKeyDllResourceDirectory" value="..\resources\SeedKeyDlls" />
+    <Parameter name="SeedKeyDllMappingFile" value="..\resources\SeedKeyDlls\SeedKeyDllTestFiles.local.map" />
+  </TestRunParameters>
+</RunSettings>
