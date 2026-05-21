@@ -13,8 +13,10 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_HOME: ${{ github.workspace }}/.dotnet-cli-home
   SOLUTION_FILE: DiagKit.Uds.slnx
-  TEST_PROJECT: tests/DiagKit.Uds.Tests/DiagKit.Uds.Tests.csproj
-  PACKAGE_PROJECT: src/DiagKit.Uds/DiagKit.Uds.csproj
+  UDS_TEST_PROJECT: tests/DiagKit.Uds.Tests/DiagKit.Uds.Tests.csproj
+  CANHUB_TEST_PROJECT: tests/DiagKit.Uds.CanHub.Tests/DiagKit.Uds.CanHub.Tests.csproj
+  UDS_PACKAGE_PROJECT: src/DiagKit.Uds/DiagKit.Uds.csproj
+  CANHUB_PACKAGE_PROJECT: src/DiagKit.Uds.CanHub/DiagKit.Uds.CanHub.csproj
   ARTIFACTS_DIR: artifacts/packages
 
 jobs:
@@ -57,11 +59,16 @@ jobs:
       - name: Build
         run: dotnet build "$SOLUTION_FILE" -c Release --no-restore
 
-      - name: Test
-        run: dotnet test "$TEST_PROJECT" -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+      - name: Test DiagKit.Uds
+        run: dotnet test "$UDS_TEST_PROJECT" -c Release --no-build --logger "trx;LogFileName=uds-test-results.trx" --results-directory TestResults
+
+      - name: Test DiagKit.Uds.CanHub
+        run: dotnet test "$CANHUB_TEST_PROJECT" -c Release --no-build --logger "trx;LogFileName=canhub-test-results.trx" --results-directory TestResults
 
       - name: Pack
-        run: dotnet pack "$PACKAGE_PROJECT" -c Release --no-build -o "$ARTIFACTS_DIR"
+        run: |
+          dotnet pack "$UDS_PACKAGE_PROJECT" -c Release --no-build -o "$ARTIFACTS_DIR"
+          dotnet pack "$CANHUB_PACKAGE_PROJECT" -c Release --no-build -o "$ARTIFACTS_DIR"
 
       - name: Push packages to NuGet
         run: dotnet nuget push "$ARTIFACTS_DIR"/*.nupkg --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

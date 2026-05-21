@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- 编译 -->
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -9,25 +10,51 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 
-    <Version>1.0.0-preview.1</Version>
+    <!-- 版本 -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>1.0</MinVerMinimumMajorMinor>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- 包元数据 -->
     <Authors>Eric YaRu YANG</Authors>
     <Title>DiagKit.Uds CanHub Bridge</Title>
     <Description>Bridge package connecting DiagKit.Uds DoCAN transport to CanHub ICanBus.</Description>
     <Copyright>Copyright (c) 2025-2026 Eric YaRu YANG</Copyright>
     <PackageTags>UDS;DoCAN;CanHub;CAN;automotive;diagnostics</PackageTags>
+
+    <!-- 许可 -->
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+    <!-- 包内容 -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>diagkit-uds.png</PackageIcon>
+
+    <!-- 发布 -->
+    <PackageReleaseNotes>Initial CanHub bridge release.</PackageReleaseNotes>
+
+    <!-- URL -->
+    <PackageProjectUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+
+    <!-- Source Link + 符号 -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\diagkit-uds.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CanHub.Abstractions" Version="1.0.0-preview.4" />
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
