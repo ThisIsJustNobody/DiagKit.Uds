@@ -18,12 +18,18 @@
 - **NRC 自动处理** — RC 0x78（ResponsePending）等待与 RC 0x21（BusyRepeatRequest）重试状态机
 - **可插拔传输层** — 支持委托、`Channel<T>`、`BlockingCollection<T>` 或自定义收发器注入
 - **内置服务端** — `AsyncUdsServer` 分发器与 `UdsEcuSimulator` 模拟器，方便测试
-- **常用服务辅助类** — 会话控制、TesterPresent、安全访问、按 ID 读数据、例程控制、DTC 读取
+- **常用服务辅助类** — 会话控制、TesterPresent、安全访问、按 ID 读数据、例程控制、DTC 读取、RequestDownload、TransferData、RequestTransferExit
 
 ## 安装
 
 ```bash
 dotnet add package DiagKit.Uds --version 3.0.0
+```
+
+可选 CanHub 桥接包：
+
+```bash
+dotnet add package DiagKit.Uds.CanHub
 ```
 
 ## 快速开始
@@ -43,6 +49,19 @@ var client = new AsyncUdsClient(transport);
 byte[] response = await client.SendRequestAsync(new byte[] { 0x10, 0x03 });
 ```
 
+CanHub 用户可从已打开的总线直接创建 DoCAN 传输：
+
+```csharp
+using DiagKit.Uds.CanHub;
+
+await using ICanBus bus = await registry.OpenAsync("vector://VN16XX?channelIndex=0");
+await using var transport = bus.CreateDoCanTransport(new DoCanOptions
+{
+    RequestId = 0x7E0,
+    ResponseId = 0x7E8,
+});
+```
+
 详细 API 文档、服务端用法、DoIP 传输、完整配置参数请参见 [包 README（中文）](src/DiagKit.Uds/README.zh-CN.md)。
 
 ## 构建
@@ -51,7 +70,9 @@ byte[] response = await client.SendRequestAsync(new byte[] { 0x10, 0x03 });
 dotnet restore "DiagKit.Uds.slnx"
 dotnet build "DiagKit.Uds.slnx" -c Release --no-restore
 dotnet test tests\DiagKit.Uds.Tests\DiagKit.Uds.Tests.csproj
+dotnet test tests\DiagKit.Uds.CanHub.Tests\DiagKit.Uds.CanHub.Tests.csproj
 dotnet pack src\DiagKit.Uds\DiagKit.Uds.csproj -c Release --no-build -o artifacts\packages
+dotnet pack src\DiagKit.Uds.CanHub\DiagKit.Uds.CanHub.csproj -c Release --no-build -o artifacts\packages
 ```
 
 ## 许可证

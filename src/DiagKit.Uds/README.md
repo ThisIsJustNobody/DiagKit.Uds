@@ -28,7 +28,8 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
   per-SID handlers with built-in NRC support.
 - **Helpers for common services** — DiagnosticSessionControl, TesterPresent
   (with keep-alive), SecurityAccess (seed/key), ReadDataByIdentifier,
-  RoutineControl, ReadDtcInformation.
+  RoutineControl, ReadDtcInformation, RequestDownload, TransferData,
+  RequestTransferExit.
 
 ## Architecture
 
@@ -57,6 +58,12 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
 
 ```bash
 dotnet add package DiagKit.Uds
+```
+
+Optional CanHub bridge package:
+
+```bash
+dotnet add package DiagKit.Uds.CanHub
 ```
 
 Or reference the project directly:
@@ -146,7 +153,70 @@ using var archGenerator = CanoeSeedKeyGenerator.LoadForCurrentProcess(
     x64Path: @"C:\SeedKey\x64\SeedKey.dll");
 ```
 
-### 5. TesterPresent keep-alive
+For OEM variants that include extra requestSeed data or build a custom sendKey
+payload, use the context-based overload:
+
+```csharp
+bool unlocked = await SecurityAccess.UnlockAsync(client,
+    requestSeedLevel: 0x01,
+    requestSeedParameterRecord: new byte[] { testerRandom0, testerRandom1 },
+    keyParameterRecordBuilder: context =>
+    {
+        byte[] key = ComputeOemKey(context.Seed.Span, context.RequestSeedParameterRecord.Span);
+        return key;
+    },
+    sendKeyLevel: 0x02);
+```
+
+### 5. Flashing helpers
+
+```csharp
+var download = await RequestDownload.InvokeAsync(client,
+    dataFormatIdentifier: 0x00,
+    memoryAddress: 0x00040000,
+    memorySize: (ulong)image.Length,
+    memoryAddressLength: 4,
+    memorySizeLength: 4);
+
+await TransferData.SendBlocksAsync(
+    client,
+    image,
+    download.MaxTransferDataPayloadLength);
+
+await RequestTransferExit.InvokeAsync(client);
+
+var erase = await RoutineControl.StartAndExpectCompletedAsync(
+    client,
+    routineId: 0xFF00,
+    isCompleted: r => r.StatusRecord.Length > 0 && r.StatusRecord.Span[0] == 0x00,
+    pollInterval: TimeSpan.FromMilliseconds(200),
+    timeout: TimeSpan.FromSeconds(30));
+```
+
+These helpers validate the positive-response SID and echoed fields. They do not
+encode OEM erase/checksum policy or firmware-file formats.
+
+### 6. CanHub bridge
+
+`DiagKit.Uds` itself remains dependency-free. If your link layer is CanHub,
+install `DiagKit.Uds.CanHub`, which currently depends on the latest accepted
+`CanHub.Abstractions` preview.
+
+```csharp
+using DiagKit.Uds.CanHub;
+
+await using ICanBus bus = await registry.OpenAsync("vector://VN16XX?channelIndex=0");
+await using var transport = bus.CreateDoCanTransport(new DoCanOptions
+{
+    RequestId = 0x7E0,
+    ResponseId = 0x7E8,
+    UseFd = false,
+});
+
+var udsClient = new AsyncUdsClient(transport);
+```
+
+### 7. TesterPresent keep-alive
 
 ```csharp
 // Prefer session-managed keep-alive:

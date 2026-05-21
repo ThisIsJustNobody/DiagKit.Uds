@@ -9,6 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 
+    <Version>1.0.0-preview.1</Version>
     <Authors>Eric YaRu YANG</Authors>
     <Title>DiagKit.Uds CanHub Bridge</Title>
     <Description>Bridge package connecting DiagKit.Uds DoCAN transport to CanHub ICanBus.</Description>
@@ -16,9 +17,14 @@
     <PackageTags>UDS;DoCAN;CanHub;CAN;automotive;diagnostics</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CanHub.Abstractions" Version="1.0.0-preview.4" />

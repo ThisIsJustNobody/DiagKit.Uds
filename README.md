@@ -19,12 +19,18 @@ Zero external NuGet dependencies.
 - **Robust NRC handling** — automatic state machines for RC 0x78 (ResponsePending) and RC 0x21 (BusyRepeatRequest)
 - **Pluggable transport** — accepts delegates, `Channel<T>`, `BlockingCollection<T>`, or custom transmitters
 - **Server side included** — `AsyncUdsServer` dispatcher and `UdsEcuSimulator` for testing
-- **Helpers for common services** — SessionControl, TesterPresent, SecurityAccess, ReadDataByIdentifier, RoutineControl, ReadDtcInformation
+- **Helpers for common services** — SessionControl, TesterPresent, SecurityAccess, ReadDataByIdentifier, RoutineControl, ReadDtcInformation, RequestDownload, TransferData, RequestTransferExit
 
 ## Installation
 
 ```bash
 dotnet add package DiagKit.Uds
+```
+
+Optional CanHub bridge:
+
+```bash
+dotnet add package DiagKit.Uds.CanHub
 ```
 
 ## Quick start
@@ -44,6 +50,19 @@ var client = new AsyncUdsClient(transport);
 byte[] response = await client.SendRequestAsync(new byte[] { 0x10, 0x03 });
 ```
 
+CanHub users can create the DoCAN transport directly from an opened bus:
+
+```csharp
+using DiagKit.Uds.CanHub;
+
+await using ICanBus bus = await registry.OpenAsync("vector://VN16XX?channelIndex=0");
+await using var transport = bus.CreateDoCanTransport(new DoCanOptions
+{
+    RequestId = 0x7E0,
+    ResponseId = 0x7E8,
+});
+```
+
 See the [package README](src/DiagKit.Uds/README.md) for detailed API documentation, server-side usage, DoIP transport, and full configuration reference.
 
 ## Build
@@ -52,7 +71,9 @@ See the [package README](src/DiagKit.Uds/README.md) for detailed API documentati
 dotnet restore "DiagKit.Uds.slnx"
 dotnet build "DiagKit.Uds.slnx" -c Release --no-restore
 dotnet test tests\DiagKit.Uds.Tests\DiagKit.Uds.Tests.csproj
+dotnet test tests\DiagKit.Uds.CanHub.Tests\DiagKit.Uds.CanHub.Tests.csproj
 dotnet pack src\DiagKit.Uds\DiagKit.Uds.csproj -c Release --no-build -o artifacts\packages
+dotnet pack src\DiagKit.Uds.CanHub\DiagKit.Uds.CanHub.csproj -c Release --no-build -o artifacts\packages
 ```
 
 ## License
