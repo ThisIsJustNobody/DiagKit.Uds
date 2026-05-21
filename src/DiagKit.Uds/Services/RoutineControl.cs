@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -78,5 +79,63 @@ public static class RoutineControl
         ArgumentNullException.ThrowIfNull(client);
         var resp = await client.SendRequestAsync(BuildRequest(type, routineId, routineData.Span), null, cancellationToken).ConfigureAwait(false);
         return ParseResponse(resp.Span, type, routineId);
+    }
+
+    /// <summary>
+    /// 启动例程，并按调用方提供的完成条件轮询结果直至完成。<br/>
+    /// Start a routine and poll routine results until the caller-provided completion predicate matches.
+    /// </summary>
+    /// <param name="client">UDS 异步客户端。<br/>The UDS async client.</param>
+    /// <param name="routineId">例程标识符。<br/>The routine identifier.</param>
+    /// <param name="isCompleted">判断例程是否完成的委托。<br/>Predicate that determines whether the routine is complete.</param>
+    /// <param name="routineData">启动例程时的可选数据。<br/>Optional data for StartRoutine.</param>
+    /// <param name="pollInterval">轮询间隔；默认 200 ms。<br/>Polling interval; defaults to 200 ms.</param>
+    /// <param name="timeout">总等待超时；默认 30 s。<br/>Overall timeout; defaults to 30 s.</param>
+    /// <param name="cancellationToken">取消令牌。<br/>Cancellation token.</param>
+    /// <returns>满足完成条件的例程控制响应。<br/>The routine control response that matched the completion predicate.</returns>
+    public static async Task<Response> StartAndExpectCompletedAsync(
+        IAsyncUdsClient client,
+        ushort routineId,
+        Func<Response, bool> isCompleted,
+        ReadOnlyMemory<byte> routineData = default,
+        TimeSpan? pollInterval = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(isCompleted);
+
+        TimeSpan actualPollInterval = pollInterval ?? TimeSpan.FromMilliseconds(200);
+        TimeSpan actualTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        if (actualPollInterval < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(pollInterval), actualPollInterval, "Poll interval must be non-negative.");
+        if (actualTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout), actualTimeout, "Timeout must be positive.");
+
+        var sw = Stopwatch.StartNew();
+        var response = await InvokeAsync(
+            client,
+            RoutineControlType.StartRoutine,
+            routineId,
+            routineData,
+            cancellationToken).ConfigureAwait(false);
+        if (isCompleted(response)) return response;
+
+        while (sw.Elapsed < actualTimeout)
+        {
+            TimeSpan remaining = actualTimeout - sw.Elapsed;
+            TimeSpan delay = actualPollInterval <= remaining ? actualPollInterval : remaining;
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+
+            response = await InvokeAsync(
+                client,
+                RoutineControlType.RequestRoutineResults,
+                routineId,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (isCompleted(response)) return response;
+        }
+
+        throw new TimeoutException($"RoutineControl routine 0x{routineId:X4} did not complete within {actualTimeout.TotalMilliseconds:F0} ms.");
     }
 }
