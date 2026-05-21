@@ -23,9 +23,22 @@ public static class SecurityAccess
     /// <param name="level">安全访问级别（必须为奇数）。<br/>The security access level (must be odd).</param>
     /// <returns>requestSeed 请求字节数组。<br/>The requestSeed request byte array.</returns>
     public static byte[] BuildRequestSeed(byte level)
+        => BuildRequestSeed(level, default);
+
+    /// <summary>
+    /// 为指定级别构建带附加参数记录的 requestSeed 请求。<br/>Build a requestSeed request with an additional parameter record.
+    /// </summary>
+    /// <param name="level">安全访问级别（必须为奇数）。<br/>The security access level (must be odd).</param>
+    /// <param name="securityAccessDataRecord">OEM 附加参数记录。<br/>OEM-specific additional parameter record.</param>
+    /// <returns>requestSeed 请求字节数组。<br/>The requestSeed request byte array.</returns>
+    public static byte[] BuildRequestSeed(byte level, ReadOnlySpan<byte> securityAccessDataRecord)
     {
         if ((level & 1) == 0) throw new ArgumentException("Seed-request sub-function must be odd.", nameof(level));
-        return [(byte)UdsServiceId.SecurityAccess, level];
+        var buf = new byte[2 + securityAccessDataRecord.Length];
+        buf[0] = (byte)UdsServiceId.SecurityAccess;
+        buf[1] = level;
+        securityAccessDataRecord.CopyTo(buf.AsSpan(2));
+        return buf;
     }
 
     /// <summary>
@@ -78,6 +91,59 @@ public static class SecurityAccess
         byte sendKeyLevel = (byte)(requestSeedLevel + 1);
         var keyResp = await client.SendRequestAsync(BuildSendKey(sendKeyLevel, key), null, cancellationToken).ConfigureAwait(false);
         if (keyResp.Length < 2 || keyResp.Span[0] != 0x67 || keyResp.Span[1] != sendKeyLevel)
+            throw new ProtocolException("Unexpected SecurityAccess key response.");
+        return true;
+    }
+
+    /// <summary>
+    /// 执行支持 OEM requestSeed 参数记录和自定义 sendKey 载荷的 SecurityAccess 解锁流程。<br/>
+    /// Perform a SecurityAccess unlock flow with OEM requestSeed parameters and custom sendKey payload.
+    /// </summary>
+    /// <param name="client">UDS 异步客户端。<br/>The UDS async client.</param>
+    /// <param name="requestSeedLevel">requestSeed 子功能级别（必须为奇数）。<br/>The requestSeed sub-function level (must be odd).</param>
+    /// <param name="requestSeedParameterRecord">requestSeed 附加参数记录。<br/>Additional requestSeed parameter record.</param>
+    /// <param name="keyParameterRecordBuilder">根据种子上下文构建 sendKey 参数记录。<br/>Builds the sendKey parameter record from seed context.</param>
+    /// <param name="sendKeyLevel">可选的 sendKey 子功能级别；默认使用 requestSeedLevel + 1。<br/>Optional sendKey sub-function level; defaults to requestSeedLevel + 1.</param>
+    /// <param name="cancellationToken">取消令牌。<br/>Cancellation token.</param>
+    /// <returns>解锁成功时返回 <see langword="true"/>。<br/><see langword="true"/> when unlocked successfully.</returns>
+    public static async Task<bool> UnlockAsync(
+        IAsyncUdsClient client,
+        byte requestSeedLevel,
+        ReadOnlyMemory<byte> requestSeedParameterRecord,
+        Func<SecurityAccessSeedContext, byte[]> keyParameterRecordBuilder,
+        byte? sendKeyLevel = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(keyParameterRecordBuilder);
+        if ((requestSeedLevel & 1) == 0)
+            throw new ArgumentException("Seed-request sub-function must be odd.", nameof(requestSeedLevel));
+
+        byte actualSendKeyLevel = sendKeyLevel ?? checked((byte)(requestSeedLevel + 1));
+        byte[] requestSeedParameterRecordCopy = requestSeedParameterRecord.ToArray();
+
+        var seedResp = await client.SendRequestAsync(
+            BuildRequestSeed(requestSeedLevel, requestSeedParameterRecordCopy),
+            null,
+            cancellationToken).ConfigureAwait(false);
+        if (seedResp.Length < 2 || seedResp.Span[0] != 0x67 || seedResp.Span[1] != requestSeedLevel)
+            throw new ProtocolException("Unexpected SecurityAccess seed response.");
+
+        var seed = seedResp.Span[2..].ToArray();
+        // An all-zero seed means the ECU is already unlocked at this level.
+        if (IsAllZero(seed)) return true;
+
+        var context = new SecurityAccessSeedContext(
+            requestSeedLevel,
+            actualSendKeyLevel,
+            seed,
+            requestSeedParameterRecordCopy);
+        var keyParameterRecord = keyParameterRecordBuilder(context);
+        var keyResp = await client.SendRequestAsync(
+            BuildSendKeyUnchecked(actualSendKeyLevel, keyParameterRecord),
+            null,
+            cancellationToken).ConfigureAwait(false);
+        if (keyResp.Length < 2 || keyResp.Span[0] != 0x67 || keyResp.Span[1] != actualSendKeyLevel)
             throw new ProtocolException("Unexpected SecurityAccess key response.");
         return true;
     }
@@ -143,5 +209,14 @@ public static class SecurityAccess
     {
         foreach (var b in buf) if (b != 0) return false;
         return buf.Length > 0;
+    }
+
+    private static byte[] BuildSendKeyUnchecked(byte level, ReadOnlySpan<byte> key)
+    {
+        var buf = new byte[2 + key.Length];
+        buf[0] = (byte)UdsServiceId.SecurityAccess;
+        buf[1] = level;
+        key.CopyTo(buf.AsSpan(2));
+        return buf;
     }
 }

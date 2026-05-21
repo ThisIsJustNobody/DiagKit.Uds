@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DiagKit.Uds/DiagKit.Uds.csproj" />
+    <Project Path="src/DiagKit.Uds.CanHub/DiagKit.Uds.CanHub.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DiagKit.Uds.CanHub.Tests/DiagKit.Uds.CanHub.Tests.csproj" />
     <Project Path="tests/DiagKit.Uds.Tests/DiagKit.Uds.Tests.csproj" />
   </Folder>
 </Solution>

@@ -18,7 +18,7 @@ ISO 13400）协议栈的汽车 ECU 诊断通信，无外部依赖。
 - **NRC 自动处理** — RC 0x78（ResponsePending）与 RC 0x21（BusyRepeatRequest）内建状态机，超时可配置。
 - **可插拔传输层** — 支持原始发送/接收 `Func`/`Action` 委托、`IAsyncTransmitter<T>`/`ITransmitter<T>` 实例，或直接传入 `Channel<T>` / `BlockingCollection<T>`。
 - **内置服务端** — `AsyncUdsServer` 将入站请求分发到各 SID 处理器，内建 NRC 支持。
-- **常用服务辅助类** — DiagnosticSessionControl、TesterPresent（含心跳保活）、SecurityAccess（种子/密钥）、ReadDataByIdentifier、RoutineControl、ReadDtcInformation。
+- **常用服务辅助类** — DiagnosticSessionControl、TesterPresent（含心跳保活）、SecurityAccess（种子/密钥）、ReadDataByIdentifier、RoutineControl、ReadDtcInformation、RequestDownload、TransferData、RequestTransferExit。
 
 ## 架构
 
@@ -47,6 +47,12 @@ ISO 13400）协议栈的汽车 ECU 诊断通信，无外部依赖。
 
 ```bash
 dotnet add package DiagKit.Uds
+```
+
+可选 CanHub 桥接包：
+
+```bash
+dotnet add package DiagKit.Uds.CanHub
 ```
 
 或直接引用项目：
@@ -136,7 +142,66 @@ using var archGenerator = CanoeSeedKeyGenerator.LoadForCurrentProcess(
     x64Path: @"C:\SeedKey\x64\SeedKey.dll");
 ```
 
-### 5. TesterPresent 心跳保活
+对于 requestSeed 携带额外数据、或 sendKey 载荷需要双随机/OEM 字段的变体，可使用上下文 overload：
+
+```csharp
+bool unlocked = await SecurityAccess.UnlockAsync(client,
+    requestSeedLevel: 0x01,
+    requestSeedParameterRecord: new byte[] { testerRandom0, testerRandom1 },
+    keyParameterRecordBuilder: context =>
+    {
+        byte[] key = ComputeOemKey(context.Seed.Span, context.RequestSeedParameterRecord.Span);
+        return key;
+    },
+    sendKeyLevel: 0x02);
+```
+
+### 5. 刷写辅助类
+
+```csharp
+var download = await RequestDownload.InvokeAsync(client,
+    dataFormatIdentifier: 0x00,
+    memoryAddress: 0x00040000,
+    memorySize: (ulong)image.Length,
+    memoryAddressLength: 4,
+    memorySizeLength: 4);
+
+await TransferData.SendBlocksAsync(
+    client,
+    image,
+    download.MaxTransferDataPayloadLength);
+
+await RequestTransferExit.InvokeAsync(client);
+
+var erase = await RoutineControl.StartAndExpectCompletedAsync(
+    client,
+    routineId: 0xFF00,
+    isCompleted: r => r.StatusRecord.Length > 0 && r.StatusRecord.Span[0] == 0x00,
+    pollInterval: TimeSpan.FromMilliseconds(200),
+    timeout: TimeSpan.FromSeconds(30));
+```
+
+这些辅助类会校验肯定响应 SID 和 echo 字段，但不会内置 OEM 擦除/校验策略或固件文件格式。
+
+### 6. CanHub 桥接
+
+`DiagKit.Uds` 主包仍保持零外部依赖。若链路层使用 CanHub，可安装 `DiagKit.Uds.CanHub`；该包当前依赖接受的最新 `CanHub.Abstractions` 预览版。
+
+```csharp
+using DiagKit.Uds.CanHub;
+
+await using ICanBus bus = await registry.OpenAsync("vector://VN16XX?channelIndex=0");
+await using var transport = bus.CreateDoCanTransport(new DoCanOptions
+{
+    RequestId = 0x7E0,
+    ResponseId = 0x7E8,
+    UseFd = false,
+});
+
+var udsClient = new AsyncUdsClient(transport);
+```
+
+### 7. TesterPresent 心跳保活
 
 ```csharp
 // 推荐使用会话管理的心跳：

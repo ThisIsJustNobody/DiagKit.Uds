@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+
+    <Version>1.0.0-preview.1</Version>
+    <Authors>Eric YaRu YANG</Authors>
+    <Title>DiagKit.Uds CanHub Bridge</Title>
+    <Description>Bridge package connecting DiagKit.Uds DoCAN transport to CanHub ICanBus.</Description>
+    <Copyright>Copyright (c) 2025-2026 Eric YaRu YANG</Copyright>
+    <PackageTags>UDS;DoCAN;CanHub;CAN;automotive;diagnostics</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/ThisIsJustNobody/DiagKit.Uds.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CanHub.Abstractions" Version="1.0.0-preview.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiagKit.Uds\DiagKit.Uds.csproj" />
+  </ItemGroup>
+
+</Project>
