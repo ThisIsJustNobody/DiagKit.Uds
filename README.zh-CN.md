@@ -18,7 +18,7 @@
 - **NRC 自动处理** — RC 0x78（ResponsePending）等待与 RC 0x21（BusyRepeatRequest）重试状态机
 - **可插拔传输层** — 支持委托、`Channel<T>`、`BlockingCollection<T>` 或自定义收发器注入
 - **内置服务端** — `AsyncUdsServer` 分发器与 `UdsEcuSimulator` 模拟器，方便测试
-- **常用服务辅助类** — 会话控制、TesterPresent、安全访问、按 ID 读数据、例程控制、DTC 读取、RequestDownload、TransferData、RequestTransferExit
+- **常用服务辅助类** — 会话控制、ECU 复位、TesterPresent、安全访问、按 ID 读/写数据、例程控制、DTC 服务、IO 控制、RequestDownload/Upload、TransferData、RequestTransferExit
 
 ## 安装
 

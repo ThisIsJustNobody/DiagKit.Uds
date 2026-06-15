@@ -26,9 +26,10 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
   `BlockingCollection<T>` directly.
 - **Server side included** — `AsyncUdsServer` dispatches inbound requests to
   per-SID handlers with built-in NRC support.
-- **Helpers for common services** — DiagnosticSessionControl, TesterPresent
-  (with keep-alive), SecurityAccess (seed/key), ReadDataByIdentifier,
-  RoutineControl, ReadDtcInformation, RequestDownload, TransferData,
+- **Helpers for common services** — DiagnosticSessionControl, ECUReset,
+  TesterPresent (with keep-alive), SecurityAccess (seed/key),
+  ReadDataByIdentifier, WriteDataByIdentifier, RoutineControl, DTC services,
+  InputOutputControlByIdentifier, RequestDownload/Upload, TransferData,
   RequestTransferExit.
 
 ## Architecture
@@ -38,7 +39,8 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
 │  Application                                               │
 │  Services.DiagnosticSessionControl, TesterPresent,         │
 │           SecurityAccess, ReadDataByIdentifier,            │
-│           RoutineControl, ReadDtcInformation               │
+│           WriteDataByIdentifier, RoutineControl, DTC,      │
+│           IO control, flashing helpers                     │
 ├────────────────────────────────────────────────────────────┤
 │  UDS application layer (UdsLayer)                          │
 │  AsyncUdsClient / UdsClient        AsyncUdsServer          │
@@ -185,6 +187,14 @@ await TransferData.SendBlocksAsync(
 
 await RequestTransferExit.InvokeAsync(client);
 
+// The upload-side negotiation mirrors RequestDownload.
+var upload = await RequestUpload.InvokeAsync(client,
+    dataFormatIdentifier: 0x00,
+    memoryAddress: 0x00040000,
+    memorySize: 0x1000,
+    memoryAddressLength: 4,
+    memorySizeLength: 4);
+
 var erase = await RoutineControl.StartAndExpectCompletedAsync(
     client,
     routineId: 0xFF00,
@@ -237,8 +247,11 @@ requests may be in flight, and do not enable it together with
 
 `UdsEcuSimulator` is the easiest way to build an ECU stand-in for tests. It
 keeps ECU-like state and includes common services such as DiagnosticSessionControl,
-TesterPresent, ReadDataByIdentifier, SecurityAccess, RoutineControl, and
-ReadDTCInformation.
+TesterPresent, ReadDataByIdentifier, WriteDataByIdentifier, SecurityAccess,
+RoutineControl, ReadDTCInformation, ClearDiagnosticInformation, ECUReset, and
+ControlDTCSetting. Other helpers such as CommunicationControl,
+InputOutputControlByIdentifier, and RequestUpload are client-side helpers only
+unless you register simulator handlers for them.
 
 ```csharp
 var simulator = new UdsEcuSimulator(transport);
@@ -388,7 +401,7 @@ src/
     ├── DoIp/        # ISO 13400 stream/message transports
     ├── Exceptions/  # UdsException hierarchy
     ├── Internal/    # LinkedCts (timeout-aware cancellation linker)
-    ├── Services/    # Helpers for SID 0x10, 0x22, 0x27, 0x31, 0x3E, 0x19
+    ├── Services/    # Helpers for common ISO 14229 service IDs
     └── UdsLayer/    # UDS client/server/session/simulator
 tests/
 └── DiagKit.Uds.Tests/   # MSTest v4 suite

@@ -58,6 +58,7 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
     private CancellationTokenSource? _runCts;
     private Task? _runTask;
     private int _disposed;
+    private int _dtcSettingEnabled = 1;
     private DiagnosticSessionType _activeSession;
 
     /// <summary>
@@ -68,6 +69,9 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
 
     /// <summary>当前诊断会话。<br/>The currently active diagnostic session.</summary>
     public DiagnosticSessionType ActiveSession => _activeSession;
+
+    /// <summary>DTC 设置当前是否启用。<br/>Whether DTC setting is currently enabled.</summary>
+    public bool IsDtcSettingEnabled => Volatile.Read(ref _dtcSettingEnabled) != 0;
 
     /// <summary>
     /// 当前或最近一次后台运行循环任务；未启动时为已完成任务。
@@ -458,11 +462,15 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
     private void RegisterDefaultServices()
     {
         _responders[(byte)UdsServiceId.DiagnosticSessionControl] = HandleDiagnosticSessionControlAsync;
+        _responders[(byte)UdsServiceId.EcuReset] = HandleEcuResetAsync;
         _responders[(byte)UdsServiceId.TesterPresent] = HandleTesterPresentAsync;
         _responders[(byte)UdsServiceId.ReadDataByIdentifier] = HandleReadDataByIdentifierAsync;
+        _responders[(byte)UdsServiceId.WriteDataByIdentifier] = HandleWriteDataByIdentifierAsync;
+        _responders[(byte)UdsServiceId.ClearDiagnosticInformation] = HandleClearDiagnosticInformationAsync;
         _responders[(byte)UdsServiceId.SecurityAccess] = HandleSecurityAccessAsync;
         _responders[(byte)UdsServiceId.RoutineControl] = HandleRoutineControlAsync;
         _responders[(byte)UdsServiceId.ReadDtcInformation] = HandleReadDtcInformationAsync;
+        _responders[(byte)UdsServiceId.ControlDtcSetting] = HandleControlDtcSettingAsync;
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -512,6 +520,25 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
         return SinglePositiveAsync(0x10, body);
     }
 
+    private Task<IReadOnlyList<UdsServerResponse>> HandleEcuResetAsync(
+        ReadOnlyMemory<byte> request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var span = request.Span;
+        if (span.Length != 2)
+            return SingleNegativeAsync(0x11, NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat);
+
+        var resetTypeByte = (byte)(span[1] & 0x7F);
+        if (!Enum.IsDefined(typeof(EcuResetType), resetTypeByte))
+            return SingleNegativeAsync(0x11, NegativeResponseCode.SubFunctionNotSupported);
+        if (resetTypeByte == (byte)EcuResetType.EnableRapidPowerShutdown)
+            return SingleNegativeAsync(0x11, NegativeResponseCode.SubFunctionNotSupported);
+
+        _activeSession = DiagnosticSessionType.Default;
+        return SinglePositiveAsync(0x11, [resetTypeByte]);
+    }
+
     private Task<IReadOnlyList<UdsServerResponse>> HandleTesterPresentAsync(
         ReadOnlyMemory<byte> request,
         CancellationToken cancellationToken)
@@ -548,6 +575,41 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
         }
 
         return [new UdsServerResponse(response.ToArray())];
+    }
+
+    private Task<IReadOnlyList<UdsServerResponse>> HandleWriteDataByIdentifierAsync(
+        ReadOnlyMemory<byte> request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var bytes = request.ToArray();
+        if (bytes.Length < 3)
+            return SingleNegativeAsync(0x2E, NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat);
+
+        ushort did = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(1, 2));
+        if (!_dids.ContainsKey(did))
+            return SingleNegativeAsync(0x2E, NegativeResponseCode.RequestOutOfRange);
+
+        SetDataIdentifier(did, bytes.AsMemory(3));
+        return SingleAsync(new byte[] { 0x6E, (byte)(did >> 8), (byte)did });
+    }
+
+    private Task<IReadOnlyList<UdsServerResponse>> HandleClearDiagnosticInformationAsync(
+        ReadOnlyMemory<byte> request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var span = request.Span;
+        if (span.Length != 4)
+            return SingleNegativeAsync(0x14, NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat);
+
+        uint groupOfDtc = (uint)((span[1] << 16) | (span[2] << 8) | span[3]);
+        if (groupOfDtc == 0x00FFFFFF)
+            ClearDtcs();
+        else
+            RemoveDtc(groupOfDtc);
+
+        return SingleAsync(new byte[] { 0x54 });
     }
 
     private Task<IReadOnlyList<UdsServerResponse>> HandleSecurityAccessAsync(
@@ -670,6 +732,23 @@ public sealed class UdsEcuSimulator : IAsyncUdsServer, IAsyncDisposable
         }
 
         return SingleAsync(response);
+    }
+
+    private Task<IReadOnlyList<UdsServerResponse>> HandleControlDtcSettingAsync(
+        ReadOnlyMemory<byte> request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var span = request.Span;
+        if (span.Length < 2)
+            return SingleNegativeAsync(0x85, NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat);
+
+        var settingTypeByte = (byte)(span[1] & 0x7F);
+        if (!Enum.IsDefined(typeof(DtcSettingType), settingTypeByte))
+            return SingleNegativeAsync(0x85, NegativeResponseCode.SubFunctionNotSupported);
+
+        Volatile.Write(ref _dtcSettingEnabled, settingTypeByte == (byte)DtcSettingType.On ? 1 : 0);
+        return SinglePositiveAsync(0x85, [settingTypeByte]);
     }
 
     private ushort CountMatchingDtcs(DtcStatus mask)

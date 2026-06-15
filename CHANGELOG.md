@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## 3.0.0 - Unreleased
 
+- Added typed helpers for ECUReset, ClearDiagnosticInformation, CommunicationControl, WriteDataByIdentifier, InputOutputControlByIdentifier, RequestUpload, and ControlDTCSetting.
+- Added ECU simulator defaults for ECUReset, ClearDiagnosticInformation, WriteDataByIdentifier, and ControlDTCSetting.
 - Added typed flashing helpers for RequestDownload, TransferData, and RequestTransferExit.
 - Added OEM-friendly SecurityAccess overloads for requestSeed payloads and custom sendKey payload builders.
 - Added RoutineControl.StartAndExpectCompletedAsync for predicate-based routine completion polling.

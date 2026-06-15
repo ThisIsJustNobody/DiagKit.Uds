@@ -61,6 +61,69 @@ public class UdsEcuSimulatorTests
     }
 
     [TestMethod]
+    public async Task EcuReset_DefaultService_ReturnsSessionToDefault()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+        simulator.ConfigureSession(DiagnosticSessionType.ExtendedDiagnostic);
+
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var sessionResponse = await DiagnosticSessionControl.InvokeAsync(
+            client,
+            DiagnosticSessionType.ExtendedDiagnostic,
+            TestContext.CancellationToken);
+        var response = await EcuReset.InvokeAsync(
+            client,
+            EcuResetType.SoftReset,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(EcuResetType.SoftReset, response.ResetType);
+        Assert.AreEqual(DiagnosticSessionType.ExtendedDiagnostic, sessionResponse.Session);
+        Assert.AreEqual(DiagnosticSessionType.Default, simulator.ActiveSession);
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public async Task WriteDataByIdentifier_DefaultService_UpdatesExistingDid()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+        simulator.SetDataIdentifier(0xF190, new byte[] { 0x01 });
+
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var write = await WriteDataByIdentifier.InvokeAsync(
+            client,
+            0xF190,
+            new byte[] { 0xAA, 0xBB },
+            TestContext.CancellationToken);
+        var read = await ReadDataByIdentifier.InvokeAsync(client, 0xF190, TestContext.CancellationToken);
+
+        Assert.AreEqual(0xF190, write.DataIdentifier);
+        CollectionAssert.AreEqual(new byte[] { 0xAA, 0xBB }, read.ToArray());
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public async Task WriteDataByIdentifier_UnknownDid_ReturnsNrc31()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var ex = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            WriteDataByIdentifier.InvokeAsync(
+                client,
+                0xF190,
+                new byte[] { 0xAA },
+                TestContext.CancellationToken));
+
+        Assert.AreEqual(NegativeResponseCode.RequestOutOfRange, ex.Code);
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
     public async Task ReadDataByIdentifier_UnknownDid_ReturnsNrc31()
     {
         var (client, simulator) = BuildPayloadPair();
@@ -71,6 +134,81 @@ public class UdsEcuSimulatorTests
             ReadDataByIdentifier.InvokeAsync(client, 0xF190, TestContext.CancellationToken));
 
         Assert.AreEqual(NegativeResponseCode.RequestOutOfRange, ex.Code);
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public async Task ClearDiagnosticInformation_DefaultService_ClearsAllDtcs()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+        simulator.SetDtc(0x010203, DtcStatus.ConfirmedDtc);
+        simulator.SetDtc(0x040506, DtcStatus.PendingDtc);
+
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var clear = await ClearDiagnosticInformation.InvokeAsync(
+            client,
+            0xFFFFFF,
+            TestContext.CancellationToken);
+        var records = await ReadDtcInformation.ReportDtcByStatusMaskAsync(
+            client,
+            DtcStatus.All,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(default(ClearDiagnosticInformation.Response), clear);
+        Assert.IsEmpty(records);
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public async Task ControlDtcSetting_DefaultService_TracksEnabledState()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var off = await ControlDtcSetting.InvokeAsync(
+            client,
+            DtcSettingType.Off,
+            TestContext.CancellationToken);
+        Assert.IsFalse(simulator.IsDtcSettingEnabled);
+
+        var on = await ControlDtcSetting.InvokeAsync(
+            client,
+            DtcSettingType.On,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(DtcSettingType.Off, off.SettingType);
+        Assert.AreEqual(DtcSettingType.On, on.SettingType);
+        Assert.IsTrue(simulator.IsDtcSettingEnabled);
+        await simulator.StopAsync(TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public async Task NewDefaultServices_RejectMalformedOrUnsupportedRequests()
+    {
+        var (client, simulator) = BuildPayloadPair();
+        await using var _ = simulator;
+        await simulator.StartAsync(TestContext.CancellationToken);
+
+        var resetEx = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            client.SendRequestAsync(new byte[] { 0x11, 0x7F }, false, TestContext.CancellationToken));
+        var rapidShutdownEx = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            client.SendRequestAsync(new byte[] { 0x11, 0x04 }, false, TestContext.CancellationToken));
+        var clearEx = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            client.SendRequestAsync(new byte[] { 0x14, 0xFF }, false, TestContext.CancellationToken));
+        var writeEx = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            client.SendRequestAsync(new byte[] { 0x2E, 0xF1 }, false, TestContext.CancellationToken));
+        var dtcSettingEx = await Assert.ThrowsExactlyAsync<NegativeResponseException>(() =>
+            client.SendRequestAsync(new byte[] { 0x85, 0x03 }, false, TestContext.CancellationToken));
+
+        Assert.AreEqual(NegativeResponseCode.SubFunctionNotSupported, resetEx.Code);
+        Assert.AreEqual(NegativeResponseCode.SubFunctionNotSupported, rapidShutdownEx.Code);
+        Assert.AreEqual(NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat, clearEx.Code);
+        Assert.AreEqual(NegativeResponseCode.IncorrectMessageLengthOrInvalidFormat, writeEx.Code);
+        Assert.AreEqual(NegativeResponseCode.SubFunctionNotSupported, dtcSettingEx.Code);
         await simulator.StopAsync(TestContext.CancellationToken);
     }
 
