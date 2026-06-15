@@ -3,30 +3,23 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using DiagKit.Uds.Contracts;
-using DiagKit.Uds.Exceptions;
 using DiagKit.Uds.UdsLayer;
 
 namespace DiagKit.Uds.Services;
 
 /// <summary>
-/// SID 0x34（RequestDownload/请求下载）辅助方法。<br/>Helpers for SID 0x34 RequestDownload.
+/// SID 0x35（RequestUpload/请求上传）辅助方法。<br/>Helpers for SID 0x35 RequestUpload.
 /// </summary>
-public static class RequestDownload
+public static class RequestUpload
 {
     /// <summary>
-    /// RequestDownload 肯定响应的解析结果。<br/>Parsed positive RequestDownload response.
+    /// RequestUpload 肯定响应的解析结果。<br/>Parsed positive RequestUpload response.
     /// </summary>
     public readonly record struct Response(ulong MaxNumberOfBlockLength, int MaxTransferDataPayloadLength);
 
     /// <summary>
-    /// 构建 RequestDownload 请求。<br/>Build a RequestDownload request.
+    /// 构建 RequestUpload 请求。<br/>Build a RequestUpload request.
     /// </summary>
-    /// <param name="dataFormatIdentifier">数据格式标识符。<br/>Data format identifier.</param>
-    /// <param name="memoryAddress">内存地址。<br/>Memory address.</param>
-    /// <param name="memorySize">内存大小。<br/>Memory size.</param>
-    /// <param name="memoryAddressLength">地址字节数（1..8）。<br/>Address byte length (1..8).</param>
-    /// <param name="memorySizeLength">大小字节数（1..8）。<br/>Size byte length (1..8).</param>
-    /// <returns>请求字节数组。<br/>The request byte array.</returns>
     public static byte[] BuildRequest(
         byte dataFormatIdentifier,
         ulong memoryAddress,
@@ -34,7 +27,7 @@ public static class RequestDownload
         byte memoryAddressLength,
         byte memorySizeLength)
         => MemoryParameterCodec.BuildAddressAndSizeRequest(
-            (byte)UdsServiceId.RequestDownload,
+            (byte)UdsServiceId.RequestUpload,
             dataFormatIdentifier,
             memoryAddress,
             memorySize,
@@ -42,20 +35,18 @@ public static class RequestDownload
             memorySizeLength);
 
     /// <summary>
-    /// 解析 RequestDownload 的肯定响应。<br/>Parse a positive RequestDownload response.
+    /// 解析 RequestUpload 的肯定响应。<br/>Parse a positive RequestUpload response.
     /// </summary>
-    /// <param name="response">响应数据。<br/>The response data.</param>
-    /// <returns>解析后的请求下载响应。<br/>The parsed request download response.</returns>
     public static Response ParseResponse(ReadOnlySpan<byte> response)
     {
-        const string serviceName = nameof(RequestDownload);
-        ulong maxNumberOfBlockLength = MemoryParameterCodec.ParseMaxNumberOfBlockLength(response, 0x74, serviceName);
+        const string serviceName = nameof(RequestUpload);
+        ulong maxNumberOfBlockLength = MemoryParameterCodec.ParseMaxNumberOfBlockLength(response, 0x75, serviceName);
         int maxTransferDataPayloadLength = MemoryParameterCodec.GetMaxTransferDataPayloadLength(maxNumberOfBlockLength, serviceName);
         return new Response(maxNumberOfBlockLength, maxTransferDataPayloadLength);
     }
 
     /// <summary>
-    /// 发送 RequestDownload 请求并返回解析后的响应。<br/>Send a RequestDownload request and return the parsed response.
+    /// 发送 RequestUpload 请求并返回解析后的响应。<br/>Send a RequestUpload request and return the parsed response.
     /// </summary>
     public static async Task<Response> InvokeAsync(
         IAsyncUdsClient client,
@@ -73,5 +64,4 @@ public static class RequestDownload
             cancellationToken).ConfigureAwait(false);
         return ParseResponse(resp.Span);
     }
-
 }
