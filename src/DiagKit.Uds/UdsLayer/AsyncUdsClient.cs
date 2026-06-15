@@ -78,8 +78,14 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
         ReadOnlyMemory<byte> stableRequest = reqCopy;
         if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
             throw new InvalidOperationException("A UDS request is already in flight.");
+        var lifecycleStarted = false;
         try
         {
+            _options.InitializeOrClearUpAction?.Invoke(true);
+            lifecycleStarted = true;
+            if (_options.ClearReceiveBufferBeforeRequest)
+                _clearBuffer?.Invoke();
+
             bool suppress = suppressResponse ?? UdsMessage.IsSuppressPositiveResponse(stableRequest.Span);
             var overall = Stopwatch.StartNew();
 
@@ -164,7 +170,18 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
                 }
             }
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            try
+            {
+                if (lifecycleStarted)
+                    _options.InitializeOrClearUpAction?.Invoke(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
     }
 
     private async Task<ReadOnlyMemory<byte>> WaitForFinalResponseAfterRc78Async(

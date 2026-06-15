@@ -67,12 +67,18 @@ public sealed class UdsClient : IUdsClient
         CancellationToken cancellationToken = default)
     {
         if (request.IsEmpty) throw new ArgumentException("Request is empty.", nameof(request));
+        byte[] reqCopy = request.ToArray();
         if (!_gate.Wait(0, cancellationToken))
             throw new InvalidOperationException("A UDS request is already in flight.");
+        var lifecycleStarted = false;
         try
         {
-            byte[] reqCopy = request.ToArray();
-            bool suppress = suppressResponse ?? UdsMessage.IsSuppressPositiveResponse(request.Span);
+            _options.InitializeOrClearUpAction?.Invoke(true);
+            lifecycleStarted = true;
+            if (_options.ClearReceiveBufferBeforeRequest)
+                _clearBuffer?.Invoke();
+
+            bool suppress = suppressResponse ?? UdsMessage.IsSuppressPositiveResponse(reqCopy);
             var overall = Stopwatch.StartNew();
 
             while (true)
@@ -152,7 +158,18 @@ public sealed class UdsClient : IUdsClient
                 }
             }
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            try
+            {
+                if (lifecycleStarted)
+                    _options.InitializeOrClearUpAction?.Invoke(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
     }
 
     private ReadOnlyMemory<byte> WaitForFinalResponseAfterRc78(

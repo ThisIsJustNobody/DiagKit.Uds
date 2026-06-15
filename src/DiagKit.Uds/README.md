@@ -362,6 +362,12 @@ handling rules but does not manage a TCP/TLS stream.
 | `Rc21RetryInterval` | `200 ms` | Delay between retries. |
 | `WaitWhileSuppressingResponse` | `true` | Catch negative responses to suppressed requests. |
 | `StrictServiceIdMatching` | `false` | Discard mismatched responses silently. |
+| `ClearReceiveBufferBeforeRequest` | `true` | Drain pending receive payloads after acquiring the UDS request gate and before the first send. |
+| `InitializeOrClearUpAction` | `null` | Optional per-request lifecycle hook; `true` at transaction start, `false` during cleanup. |
+
+`ClearReceiveBufferBeforeRequest` and `InitializeOrClearUpAction` run once per
+`SendRequest` / `SendRequestAsync` call. Internal RC 0x21 retries reuse the same
+request transaction and do not re-enter the lifecycle hook.
 
 ## Building & testing
 

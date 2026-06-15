@@ -322,6 +322,12 @@ byte[] vin = await ReadDataByIdentifier.InvokeAsync(client, 0xF190);
 | `Rc21RetryInterval` | `200 ms` | 重试间隔。 |
 | `WaitWhileSuppressingResponse` | `true` | 捕获被抑制请求的否定响应。 |
 | `StrictServiceIdMatching` | `false` | 静默丢弃不匹配的响应。 |
+| `ClearReceiveBufferBeforeRequest` | `true` | 获取 UDS 请求 gate 后、首次发送前清空底层接收缓存。 |
+| `InitializeOrClearUpAction` | `null` | 可选请求生命周期钩子；`true` 表示事务开始，`false` 表示清理阶段。 |
+
+`ClearReceiveBufferBeforeRequest` 和 `InitializeOrClearUpAction` 每次
+`SendRequest` / `SendRequestAsync` 只触发一次。内部 RC 0x21 重试复用同一个
+请求事务，不会重新进入生命周期钩子。
 
 ## 构建与测试
 

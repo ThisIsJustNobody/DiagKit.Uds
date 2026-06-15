@@ -110,6 +110,22 @@ public class OptionsTests
     }
 
     [TestMethod]
+    public void UdsOptionsClone_CopiesRequestLifecycleOptions()
+    {
+        Action<bool> lifecycle = _ => { };
+        var options = new UdsOptions
+        {
+            ClearReceiveBufferBeforeRequest = false,
+            InitializeOrClearUpAction = lifecycle,
+        };
+
+        var clone = options.Clone();
+
+        Assert.IsFalse(clone.ClearReceiveBufferBeforeRequest);
+        Assert.AreSame(lifecycle, clone.InitializeOrClearUpAction);
+    }
+
+    [TestMethod]
     public void InvalidDoCanOptions_ThrowDuringConstruction()
     {
         var outbound = Channel.CreateUnbounded<CanFrame>();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Channels;
@@ -12,14 +13,16 @@ namespace DiagKit.Uds.Tests;
 [TestClass]
 public class AsyncUdsClientTests
 {
-    private static (AsyncUdsClient client, Channel<ReadOnlyMemory<byte>> outgoing, Channel<ReadOnlyMemory<byte>> incoming) BuildClient(UdsOptions? options = null)
+    private static (AsyncUdsClient client, Channel<ReadOnlyMemory<byte>> outgoing, Channel<ReadOnlyMemory<byte>> incoming) BuildClient(
+        UdsOptions? options = null,
+        Action? clearReceiveBuffer = null)
     {
         var outgoing = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
         var incoming = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
         var client = new AsyncUdsClient(
             (data, ct) => outgoing.Writer.WriteAsync(data, ct).AsTask(),
             ct => incoming.Reader.ReadAsync(ct).AsTask(),
-            null,
+            clearReceiveBuffer,
             options);
         return (client, outgoing, incoming);
     }
@@ -63,6 +66,58 @@ public class AsyncUdsClientTests
 
         CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, sentSnapshot.ToArray());
         CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0x12 }, response.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ClearReceiveBufferBeforeRequest_DrainsStalePayloadBeforeFirstSend()
+    {
+        var outgoing = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        var incoming = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        await incoming.Writer.WriteAsync(new byte[] { 0x62, 0xF1, 0x90, 0xAA }, TestContext.CancellationToken);
+        var clearCalls = 0;
+        void Clear()
+        {
+            clearCalls++;
+            while (incoming.Reader.TryRead(out _))
+            {
+            }
+        }
+
+        var client = new AsyncUdsClient(
+            (data, ct) => outgoing.Writer.WriteAsync(data, ct).AsTask(),
+            ct => incoming.Reader.ReadAsync(ct).AsTask(),
+            Clear,
+            new UdsOptions { P2Client = TimeSpan.FromMilliseconds(500) });
+
+        var responseTask = client.SendRequestAsync(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken);
+        var sent = await outgoing.Reader.ReadAsync(TestContext.CancellationToken);
+        await incoming.Writer.WriteAsync(new byte[] { 0x62, 0xF1, 0x90, 0xBB }, TestContext.CancellationToken);
+
+        var response = await responseTask;
+
+        Assert.AreEqual(1, clearCalls);
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, sent.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0xBB }, response.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ClearReceiveBufferBeforeRequest_False_DoesNotDrainStalePayload()
+    {
+        var clearCalls = 0;
+        var options = new UdsOptions
+        {
+            ClearReceiveBufferBeforeRequest = false,
+            P2Client = TimeSpan.FromMilliseconds(500),
+        };
+        var (client, outgoing, incoming) = BuildClient(options, () => clearCalls++);
+        await incoming.Writer.WriteAsync(new byte[] { 0x62, 0xF1, 0x90, 0xAA }, TestContext.CancellationToken);
+
+        var response = await client.SendRequestAsync(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken);
+        var sent = await outgoing.Reader.ReadAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(0, clearCalls);
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, sent.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0xAA }, response.ToArray());
     }
 
     [TestMethod]
@@ -174,6 +229,53 @@ public class AsyncUdsClientTests
         var second = await outgoing.Reader.ReadAsync(TestContext.CancellationToken);
         CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, first.ToArray());
         CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, second.ToArray());
+    }
+
+    [TestMethod]
+    public async Task Rc21Retry_ClearsReceiveBufferAndRunsLifecycleOnce()
+    {
+        var lifecycle = new List<string>();
+        var clearCalls = 0;
+        var options = new UdsOptions
+        {
+            Rc21Handling = Rc21Handling.Retry,
+            Rc21RetryInterval = TimeSpan.FromMilliseconds(1),
+            Rc21CompletionTimeout = TimeSpan.FromSeconds(2),
+            P2Client = TimeSpan.FromMilliseconds(500),
+            InitializeOrClearUpAction = started => lifecycle.Add(started ? "start" : "end"),
+        };
+        var (client, outgoing, incoming) = BuildClient(options, () => clearCalls++);
+
+        var responseTask = client.SendRequestAsync(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken);
+        var first = await outgoing.Reader.ReadAsync(TestContext.CancellationToken);
+        await incoming.Writer.WriteAsync(new byte[] { 0x7F, 0x22, 0x21 }, TestContext.CancellationToken);
+        var second = await outgoing.Reader.ReadAsync(TestContext.CancellationToken);
+        await incoming.Writer.WriteAsync(new byte[] { 0x62, 0xF1, 0x90, 0x01 }, TestContext.CancellationToken);
+
+        var response = await responseTask;
+
+        Assert.AreEqual(1, clearCalls);
+        CollectionAssert.AreEqual(new[] { "start", "end" }, lifecycle);
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, first.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, second.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0x01 }, response.ToArray());
+    }
+
+    [TestMethod]
+    public async Task LifecycleHook_RunsEndOnTimeout()
+    {
+        var lifecycle = new List<string>();
+        var options = new UdsOptions
+        {
+            P2Client = TimeSpan.FromMilliseconds(20),
+            InitializeOrClearUpAction = started => lifecycle.Add(started ? "start" : "end"),
+        };
+        var (client, _, _) = BuildClient(options);
+
+        await Assert.ThrowsExactlyAsync<ProtocolException>(
+            () => client.SendRequestAsync(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken));
+
+        CollectionAssert.AreEqual(new[] { "start", "end" }, lifecycle);
     }
 
     [TestMethod]

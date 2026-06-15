@@ -51,6 +51,18 @@ public sealed class UdsOptions
     /// </summary>
     public bool StrictServiceIdMatching { get; set; } = false;
 
+    /// <summary>
+    /// 每次 UDS 请求发送前是否自动清空底层接收缓存。<br/>
+    /// Whether to clear the underlying receive buffer before each UDS request. Default true.
+    /// </summary>
+    public bool ClearReceiveBufferBeforeRequest { get; set; } = true;
+
+    /// <summary>
+    /// UDS 请求生命周期钩子。参数 true 表示请求事务开始，false 表示结束/清理。<br/>
+    /// Request lifecycle hook. true means transaction start; false means transaction end/cleanup.
+    /// </summary>
+    public Action<bool>? InitializeOrClearUpAction { get; set; }
+
     /// <summary>创建这些选项的可变副本。<br/>Create a mutable copy of these options.</summary>
     /// <returns>一个新的 <see cref="UdsOptions"/> 实例，值与此实例相同。<br/>A new <see cref="UdsOptions"/> instance with the same values.</returns>
     public UdsOptions Clone() => new()
@@ -65,6 +77,8 @@ public sealed class UdsOptions
         Rc21CompletionTimeout = Rc21CompletionTimeout,
         WaitWhileSuppressingResponse = WaitWhileSuppressingResponse,
         StrictServiceIdMatching = StrictServiceIdMatching,
+        ClearReceiveBufferBeforeRequest = ClearReceiveBufferBeforeRequest,
+        InitializeOrClearUpAction = InitializeOrClearUpAction,
     };
 
     /// <summary>验证选项一致性。如果无效则抛出异常。<br/>Validate option coherence. Throws if invalid.</summary>
