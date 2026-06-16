@@ -102,10 +102,6 @@ public sealed class DoCanOptions
     /// </summary>
     public TimeSpan TimeoutAs { get; set; } = TimeSpan.FromSeconds(1);
 
-    // <summary>
-    // Legacy TimeoutAr comment superseded below.
-    // </summary>
-    // Corrected documentation: N_Ar is receiver-side N-PDU transmit timing, not first-frame receive timing.
     /// <summary>
     /// Receiver-side CAN N-PDU transmission timeout, typically for flow-control frames. ISO: N_Ar.
     /// </summary>
