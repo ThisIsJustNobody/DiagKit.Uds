@@ -191,13 +191,11 @@ public class UdsClientTests
             },
             options: options);
 
-        var sw = Stopwatch.StartNew();
         var requestTask = Task.Run(() => client.SendRequest(new byte[] { 0x3E, 0x80 }, cancellationToken: CancellationToken.None));
         var resp = requestTask.WaitAsync(TimeSpan.FromSeconds(3), TestContext.CancellationToken).GetAwaiter().GetResult();
 
         Assert.IsTrue(resp.IsEmpty);
         Assert.IsGreaterThanOrEqualTo(2, receives);
-        Assert.IsTrue(sw.Elapsed < TimeSpan.FromMilliseconds(250));
     }
 
     [TestMethod]

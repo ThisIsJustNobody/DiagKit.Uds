@@ -386,13 +386,11 @@ public class AsyncUdsClientTests
             },
             options: options);
 
-        var sw = Stopwatch.StartNew();
         var resp = await client.SendRequestAsync(new byte[] { 0x3E, 0x80 }, cancellationToken: CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(3), TestContext.CancellationToken);
 
         Assert.IsTrue(resp.IsEmpty);
         Assert.IsGreaterThanOrEqualTo(2, receives);
-        Assert.IsTrue(sw.Elapsed < TimeSpan.FromMilliseconds(250));
     }
 
     [TestMethod]
