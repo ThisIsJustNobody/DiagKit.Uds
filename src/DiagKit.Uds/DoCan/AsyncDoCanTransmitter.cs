@@ -22,7 +22,7 @@ namespace DiagKit.Uds.DoCan;
 /// receive-and-receive). Concurrent calls are rejected with <see cref="InvalidOperationException"/>
 /// rather than queued, so the caller is responsible for sequencing.
 /// </remarks>
-public sealed class AsyncDoCanTransmitter : IAsyncTransmitter<ReadOnlyMemory<byte>>
+public sealed class AsyncDoCanTransmitter : IAsyncResponseStartAwareTransmitter<ReadOnlyMemory<byte>>
 {
     private readonly Func<CanFrame, CancellationToken, Task> _sendAsync;
     private readonly Func<CancellationToken, Task<CanFrame>> _receiveAsync;
@@ -109,7 +109,24 @@ public sealed class AsyncDoCanTransmitter : IAsyncTransmitter<ReadOnlyMemory<byt
             throw new InvalidOperationException("A DoCAN transmission is already in progress.");
         try
         {
-            return await ReceiveContentAsync(cancellationToken).ConfigureAwait(false);
+            return await ReceiveContentAsync(
+                cancellationToken,
+                cancellationToken,
+                _options.ReceiveStartTimeout ?? _options.TimeoutAr).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <inheritdoc/>
+    public async Task<ReadOnlyMemory<byte>> ReceiveAsync(
+        CancellationToken responseStartCancellationToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            throw new InvalidOperationException("A DoCAN transmission is already in progress.");
+        try
+        {
+            return await ReceiveContentAsync(responseStartCancellationToken, cancellationToken, receiveStartTimeout: null).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -220,13 +237,25 @@ public sealed class AsyncDoCanTransmitter : IAsyncTransmitter<ReadOnlyMemory<byt
 
     // ─── Receive side ───────────────────────────────────────────────────
 
-    private async Task<ReadOnlyMemory<byte>> ReceiveContentAsync(CancellationToken ct)
+    private async Task<ReadOnlyMemory<byte>> ReceiveContentAsync(
+        CancellationToken responseStartCt,
+        CancellationToken ct,
+        TimeSpan? receiveStartTimeout)
     {
         var options = _options;
 
         CanFrame first;
-        using (var cts = new LinkedCts(options.TimeoutAr, ct))
+        if (receiveStartTimeout.HasValue)
+        {
+            using var receiveStartTimeoutCts = new CancellationTokenSource(receiveStartTimeout.Value);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(receiveStartTimeoutCts.Token, responseStartCt, ct);
             first = await ReceiveMatchingFrameAsync(cts.Token).ConfigureAwait(false);
+        }
+        else
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(responseStartCt, ct);
+            first = await ReceiveMatchingFrameAsync(cts.Token).ConfigureAwait(false);
+        }
 
         var type = DoCanFraming.GetFrameType(first.Data.Span);
         switch (type)
@@ -257,7 +286,7 @@ public sealed class AsyncDoCanTransmitter : IAsyncTransmitter<ReadOnlyMemory<byt
             if (totalLength > options.MaxSegmentedPayloadLength)
             {
                 DoCanFraming.EncodeFlowControlFrame(fcRent.AsSpan(0, fcDlc), DoCanFlowStatus.Overflow, options.BlockSize, options.STmin, fcDlc, options.PaddingValue);
-                using (var cts = new LinkedCts(options.TimeoutAs, ct))
+                using (var cts = new LinkedCts(options.TimeoutAr, ct))
                     await _sendAsync(MakeRequestFrame(fcRent.AsMemory(0, fcDlc)), cts.Token).ConfigureAwait(false);
                 throw new ProtocolException($"Segmented message length {totalLength} exceeds MaxSegmentedPayloadLength {options.MaxSegmentedPayloadLength}.");
             }
@@ -275,7 +304,7 @@ public sealed class AsyncDoCanTransmitter : IAsyncTransmitter<ReadOnlyMemory<byt
                     await Task.Delay(options.TimeBr, ct).ConfigureAwait(false);
 
                 DoCanFraming.EncodeFlowControlFrame(fcRent.AsSpan(0, fcDlc), DoCanFlowStatus.Continue, options.BlockSize, options.STmin, fcDlc, options.PaddingValue);
-                using (var cts = new LinkedCts(options.TimeoutAs, ct))
+                using (var cts = new LinkedCts(options.TimeoutAr, ct))
                     await _sendAsync(MakeRequestFrame(fcRent.AsMemory(0, fcDlc)), cts.Token).ConfigureAwait(false);
 
                 int block = 0;
