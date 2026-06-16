@@ -16,6 +16,7 @@ public sealed class UdsClient : IUdsClient
 {
     private readonly Action<ReadOnlyMemory<byte>, CancellationToken> _send;
     private readonly Func<CancellationToken, ReadOnlyMemory<byte>> _receive;
+    private readonly Func<CancellationToken, CancellationToken, ReadOnlyMemory<byte>>? _receiveWithResponseStart;
     private readonly Action? _clearBuffer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly UdsOptions _options;
@@ -35,9 +36,20 @@ public sealed class UdsClient : IUdsClient
         Func<CancellationToken, ReadOnlyMemory<byte>> receive,
         Action? clearReceiveBuffer = null,
         UdsOptions? options = null)
+        : this(send, receive, null, clearReceiveBuffer, options)
+    {
+    }
+
+    private UdsClient(
+        Action<ReadOnlyMemory<byte>, CancellationToken> send,
+        Func<CancellationToken, ReadOnlyMemory<byte>> receive,
+        Func<CancellationToken, CancellationToken, ReadOnlyMemory<byte>>? receiveWithResponseStart,
+        Action? clearReceiveBuffer,
+        UdsOptions? options)
     {
         _send = send ?? throw new ArgumentNullException(nameof(send));
         _receive = receive ?? throw new ArgumentNullException(nameof(receive));
+        _receiveWithResponseStart = receiveWithResponseStart;
         _clearBuffer = clearReceiveBuffer;
         _options = (options ?? new UdsOptions()).Clone();
         _options.Validate();
@@ -52,6 +64,9 @@ public sealed class UdsClient : IUdsClient
         : this(
             (data, ct) => transport.Send(data, ct),
             transport.Receive,
+            transport is IResponseStartAwareTransmitter<ReadOnlyMemory<byte>> responseStartAware
+                ? responseStartAware.Receive
+                : null,
             transport.ClearReceiveBuffer,
             options)
     {
@@ -94,7 +109,7 @@ public sealed class UdsClient : IUdsClient
                         ReadOnlyMemory<byte> maybeResponse;
                         try
                         {
-                            maybeResponse = _receive(cts.Token);
+                            maybeResponse = ReceiveWithResponseStart(cts.Token, cancellationToken);
                         }
                         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                         {
@@ -123,8 +138,7 @@ public sealed class UdsClient : IUdsClient
                 {
                     try
                     {
-                        using var cts = new LinkedCts(_options.P2Client, cancellationToken);
-                        response = _receive(cts.Token);
+                        response = ReceiveWithResponseStart(_options.P2Client, cancellationToken);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -186,8 +200,7 @@ public sealed class UdsClient : IUdsClient
             ReadOnlyMemory<byte> response;
             try
             {
-                using var cts = new LinkedCts(wait, cancellationToken);
-                response = _receive(cts.Token);
+                response = ReceiveWithResponseStart(wait, cancellationToken);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -215,5 +228,18 @@ public sealed class UdsClient : IUdsClient
 
         TimeSpan GetNextRc78Wait()
             => UdsClientResponseHandling.GetNextRc78Wait(_options, overall);
+    }
+
+    private ReadOnlyMemory<byte> ReceiveWithResponseStart(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
+    {
+        using var cts = new LinkedCts(responseStartTimeout, cancellationToken);
+        return ReceiveWithResponseStart(cts.Token, cancellationToken);
+    }
+
+    private ReadOnlyMemory<byte> ReceiveWithResponseStart(CancellationToken responseStartCancellationToken, CancellationToken cancellationToken)
+    {
+        return _receiveWithResponseStart is not null
+            ? _receiveWithResponseStart(responseStartCancellationToken, cancellationToken)
+            : _receive(responseStartCancellationToken);
     }
 }

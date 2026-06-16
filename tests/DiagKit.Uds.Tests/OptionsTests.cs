@@ -146,6 +146,31 @@ public class OptionsTests
     }
 
     [TestMethod]
+    public void DoCanOptions_CloneCopiesReceiveStartTimeout()
+    {
+        var options = new DoCanOptions
+        {
+            RequestId = 0x100,
+            ResponseId = 0x101,
+            ReceiveStartTimeout = TimeSpan.FromMilliseconds(250),
+        };
+
+        var clone = options.Clone();
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), clone.ReceiveStartTimeout);
+    }
+
+    [TestMethod]
+    public void InvalidDoCanOptions_ReceiveStartTimeout_ThrowsDuringConstruction()
+    {
+        var outbound = Channel.CreateUnbounded<CanFrame>();
+        var inbound = Channel.CreateUnbounded<CanFrame>();
+        var options = new DoCanOptions { RequestId = 0x100, ResponseId = 0x101, ReceiveStartTimeout = TimeSpan.Zero };
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new AsyncDoCanTransmitter(outbound, inbound, options));
+    }
+
+    [TestMethod]
     public void InvalidDoCanOptions_InvalidEnum_ThrowsDuringConstruction()
     {
         var outbound = Channel.CreateUnbounded<CanFrame>();

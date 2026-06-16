@@ -23,6 +23,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
 {
     private readonly Func<ReadOnlyMemory<byte>, CancellationToken, Task> _sendAsync;
     private readonly Func<CancellationToken, Task<ReadOnlyMemory<byte>>> _receiveAsync;
+    private readonly Func<CancellationToken, CancellationToken, Task<ReadOnlyMemory<byte>>>? _receiveWithResponseStartAsync;
     private readonly Action? _clearBuffer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly UdsOptions _options;
@@ -42,9 +43,20 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
         Func<CancellationToken, Task<ReadOnlyMemory<byte>>> receiveAsync,
         Action? clearReceiveBuffer = null,
         UdsOptions? options = null)
+        : this(sendAsync, receiveAsync, null, clearReceiveBuffer, options)
+    {
+    }
+
+    private AsyncUdsClient(
+        Func<ReadOnlyMemory<byte>, CancellationToken, Task> sendAsync,
+        Func<CancellationToken, Task<ReadOnlyMemory<byte>>> receiveAsync,
+        Func<CancellationToken, CancellationToken, Task<ReadOnlyMemory<byte>>>? receiveWithResponseStartAsync,
+        Action? clearReceiveBuffer,
+        UdsOptions? options)
     {
         _sendAsync = sendAsync ?? throw new ArgumentNullException(nameof(sendAsync));
         _receiveAsync = receiveAsync ?? throw new ArgumentNullException(nameof(receiveAsync));
+        _receiveWithResponseStartAsync = receiveWithResponseStartAsync;
         _clearBuffer = clearReceiveBuffer;
         _options = (options ?? new UdsOptions()).Clone();
         _options.Validate();
@@ -59,6 +71,9 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
         : this(
             (data, ct) => transport.SendAsync(data, ct),
             transport.ReceiveAsync,
+            transport is IAsyncResponseStartAwareTransmitter<ReadOnlyMemory<byte>> responseStartAware
+                ? responseStartAware.ReceiveAsync
+                : null,
             transport.ClearReceiveBuffer,
             options)
     {
@@ -103,7 +118,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
                         ReadOnlyMemory<byte> maybeResponse;
                         try
                         {
-                            maybeResponse = await _receiveAsync(cts.Token).ConfigureAwait(false);
+                            maybeResponse = await ReceiveWithResponseStartAsync(cts.Token, cancellationToken).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                         {
@@ -134,8 +149,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
                 {
                     try
                     {
-                        using var cts = new LinkedCts(_options.P2Client, cancellationToken);
-                        response = await _receiveAsync(cts.Token).ConfigureAwait(false);
+                        response = await ReceiveWithResponseStartAsync(_options.P2Client, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -198,8 +212,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
             ReadOnlyMemory<byte> response;
             try
             {
-                using var cts = new LinkedCts(wait, cancellationToken);
-                response = await _receiveAsync(cts.Token).ConfigureAwait(false);
+                response = await ReceiveWithResponseStartAsync(wait, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -227,5 +240,18 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
 
         TimeSpan GetNextRc78Wait()
             => UdsClientResponseHandling.GetNextRc78Wait(_options, overall);
+    }
+
+    private async Task<ReadOnlyMemory<byte>> ReceiveWithResponseStartAsync(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
+    {
+        using var cts = new LinkedCts(responseStartTimeout, cancellationToken);
+        return await ReceiveWithResponseStartAsync(cts.Token, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ReadOnlyMemory<byte>> ReceiveWithResponseStartAsync(CancellationToken responseStartCancellationToken, CancellationToken cancellationToken)
+    {
+        if (_receiveWithResponseStartAsync is not null)
+            return await _receiveWithResponseStartAsync(responseStartCancellationToken, cancellationToken).ConfigureAwait(false);
+        return await _receiveAsync(responseStartCancellationToken).ConfigureAwait(false);
     }
 }

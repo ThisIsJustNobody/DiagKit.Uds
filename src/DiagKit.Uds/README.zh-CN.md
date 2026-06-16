@@ -314,7 +314,9 @@ byte[] vin = await ReadDataByIdentifier.InvokeAsync(client, 0xF190);
 | `PaddingValue` | `0xCC` | 标准汽车行业填充值。 |
 | `BlockSize` | `0` | 接收方 FC 块大小（0 = 无限制）。 |
 | `STmin` | `0` | 接收方最小帧间隔。 |
-| `TimeoutAs` / `Ar` / `Bs` / `Cr` | `1 s` | ISO 15765 时序预算。 |
+| `TimeoutAs` / `TimeoutAr` | `1 s` | N_As / N_Ar N-PDU transmit budgets. |
+| `TimeoutBs` / `TimeoutCr` | `1 s` | N_Bs waits for FC; N_Cr waits for each next CF, not the whole response. |
+| `ReceiveStartTimeout` | `null` | Optional standalone DoCAN receive timeout for the first matching SF/FF; null keeps the legacy `TimeoutAr` default. |
 | `FlowControlWaitInterval` | `10 ms` | FC Wait 期间回退间隔。 |
 | `MaxFlowControlWaitFrames` | `8` | 过多 FC Wait 帧后中止分段发送。 |
 | `FrameMixingMode` | `Strict` | 与非 FD 帧的共存策略。 |
@@ -323,8 +325,8 @@ byte[] vin = await ReadDataByIdentifier.InvokeAsync(client, 0xF190);
 
 | 属性 | 默认值 | 说明 |
 | --- | --- | --- |
-| `P2Client` | `150 ms` | 初始响应超时。 |
-| `P2ClientExtended` | `5 s` | RC 0x78 后的扩展超时。 |
+| `P2Client` | `150 ms` | UDS response-start timeout. For DoCAN, P2 stops once SF or FF arrives. |
+| `P2ClientExtended` | `5 s` | Response-start timeout after RC 0x78. DoCAN CF reassembly is governed by N_Cr/STmin/BS after FF. |
 | `Rc78Handling` | `WaitForCompletion` | 或 `ReturnImmediately`。 |
 | `Rc78CompletionTimeout` | `25 s` | RC 0x78 重试总预算。 |
 | `Rc21Handling` | `ReturnImmediately` | 或 `Retry`。 |

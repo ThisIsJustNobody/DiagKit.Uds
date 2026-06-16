@@ -358,7 +358,9 @@ handling rules but does not manage a TCP/TLS stream.
 | `PaddingValue` | `0xCC` | Standard automotive padding. |
 | `BlockSize` | `0` | Receiver-side FC block size (0 = unbounded). |
 | `STmin` | `0` | Receiver-side separation-time byte. |
-| `TimeoutAs` / `Ar` / `Bs` / `Cr` | `1 s` | ISO 15765 timing budgets. |
+| `TimeoutAs` / `TimeoutAr` | `1 s` | Sender-side N_As and receiver-side N_Ar N-PDU transmit budgets. |
+| `TimeoutBs` / `TimeoutCr` | `1 s` | Wait for FC (N_Bs) and next CF (N_Cr). N_Cr is per consecutive frame, not a whole-response timeout. |
+| `ReceiveStartTimeout` | `null` | Optional standalone DoCAN receive timeout for the first matching SF/FF; null preserves the legacy `TimeoutAr` default. |
 | `FlowControlWaitInterval` | `10 ms` | Back-off while FC Wait is active. |
 | `MaxFlowControlWaitFrames` | `8` | Abort segmented send after too many FC Wait frames. |
 | `FrameMixingMode` | `Strict` | Coexistence with non-FD frames. |
@@ -367,8 +369,8 @@ handling rules but does not manage a TCP/TLS stream.
 
 | Property | Default | Notes |
 | --- | --- | --- |
-| `P2Client` | `150 ms` | Initial response timeout. |
-| `P2ClientExtended` | `5 s` | After RC 0x78. |
+| `P2Client` | `150 ms` | Initial UDS response-start timeout. For DoCAN, P2 stops once the SF or FF arrives. |
+| `P2ClientExtended` | `5 s` | Response-start timeout after RC 0x78. DoCAN CF reassembly is governed by N_Cr/STmin/BS after FF. |
 | `Rc78Handling` | `WaitForCompletion` | Or `ReturnImmediately`. |
 | `Rc78CompletionTimeout` | `25 s` | Total budget while RC 0x78 retries. |
 | `Rc21Handling` | `ReturnImmediately` | Or `Retry`. |

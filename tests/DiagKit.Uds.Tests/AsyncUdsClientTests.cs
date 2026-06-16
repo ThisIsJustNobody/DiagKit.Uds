@@ -364,6 +364,32 @@ public class AsyncUdsClientTests
     }
 
     [TestMethod]
+    public async Task SuppressedRequest_NonMatchingResponsesDoNotExtendP2Window()
+    {
+        var options = new UdsOptions
+        {
+            P2Client = TimeSpan.FromMilliseconds(50),
+            WaitWhileSuppressingResponse = true,
+            StrictServiceIdMatching = false,
+        };
+        var client = new AsyncUdsClient(
+            (_, _) => Task.CompletedTask,
+            async ct =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), ct);
+                return new byte[] { 0x50, 0x03 };
+            },
+            options: options);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var sw = Stopwatch.StartNew();
+        var resp = await client.SendRequestAsync(new byte[] { 0x3E, 0x80 }, cancellationToken: cts.Token);
+
+        Assert.IsTrue(resp.IsEmpty);
+        Assert.IsTrue(sw.Elapsed < TimeSpan.FromMilliseconds(250));
+    }
+
+    [TestMethod]
     public async Task SuppressedRequest_NonMatchingResponseThrowsInStrictMode()
     {
         var options = new UdsOptions
