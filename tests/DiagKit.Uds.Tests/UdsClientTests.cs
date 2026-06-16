@@ -233,19 +233,20 @@ public class UdsClientTests
         var options = new UdsOptions
         {
             P2Client = TimeSpan.FromMilliseconds(200),
-            P2ClientExtended = TimeSpan.FromSeconds(2),
+            P2ClientExtended = TimeSpan.FromSeconds(5),
             Rc78Handling = Rc78Handling.WaitForCompletion,
-            Rc78CompletionTimeout = TimeSpan.FromMilliseconds(150),
+            Rc78CompletionTimeout = TimeSpan.FromMilliseconds(500),
         };
         var (client, _, incoming) = BuildClient(options);
         incoming.Add(new byte[] { 0x7F, 0x22, 0x78 });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var elapsed = Stopwatch.StartNew();
-        Assert.ThrowsExactly<ProtocolException>(
-            () => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, cts.Token));
+        var requestTask = Task.Run(() => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, CancellationToken.None));
+        var ex = Assert.ThrowsExactly<ProtocolException>(
+            () => requestTask.WaitAsync(TimeSpan.FromSeconds(6), TestContext.CancellationToken).GetAwaiter().GetResult());
 
-        Assert.IsLessThan(TimeSpan.FromSeconds(1), elapsed.Elapsed, $"Elapsed {elapsed.Elapsed} should be bounded by Rc78CompletionTimeout, not P2*.");
+        StringAssert.Contains(ex.Message, "RC 0x78 kept");
+        Assert.IsLessThan(TimeSpan.FromSeconds(2), elapsed.Elapsed, $"Elapsed {elapsed.Elapsed} should be bounded by Rc78CompletionTimeout, not P2*.");
     }
 
     [TestMethod]
