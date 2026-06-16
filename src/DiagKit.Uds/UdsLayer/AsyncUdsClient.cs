@@ -112,12 +112,13 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
                 if (suppress)
                 {
                     if (!_options.WaitWhileSuppressingResponse) return ReadOnlyMemory<byte>.Empty;
+                    using var cts = new LinkedCts(_options.P2Client, cancellationToken);
                     while (true)
                     {
                         ReadOnlyMemory<byte> maybeResponse;
                         try
                         {
-                            maybeResponse = await ReceiveWithResponseStartAsync(_options.P2Client, cancellationToken).ConfigureAwait(false);
+                            maybeResponse = await ReceiveWithResponseStartAsync(cts.Token, cancellationToken).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                         {
@@ -244,8 +245,13 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
     private async Task<ReadOnlyMemory<byte>> ReceiveWithResponseStartAsync(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
     {
         using var cts = new LinkedCts(responseStartTimeout, cancellationToken);
+        return await ReceiveWithResponseStartAsync(cts.Token, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ReadOnlyMemory<byte>> ReceiveWithResponseStartAsync(CancellationToken responseStartCancellationToken, CancellationToken cancellationToken)
+    {
         if (_receiveWithResponseStartAsync is not null)
-            return await _receiveWithResponseStartAsync(cts.Token, cancellationToken).ConfigureAwait(false);
-        return await _receiveAsync(cts.Token).ConfigureAwait(false);
+            return await _receiveWithResponseStartAsync(responseStartCancellationToken, cancellationToken).ConfigureAwait(false);
+        return await _receiveAsync(responseStartCancellationToken).ConfigureAwait(false);
     }
 }

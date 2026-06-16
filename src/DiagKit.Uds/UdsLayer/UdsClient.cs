@@ -103,12 +103,13 @@ public sealed class UdsClient : IUdsClient
                 if (suppress)
                 {
                     if (!_options.WaitWhileSuppressingResponse) return ReadOnlyMemory<byte>.Empty;
+                    using var cts = new LinkedCts(_options.P2Client, cancellationToken);
                     while (true)
                     {
                         ReadOnlyMemory<byte> maybeResponse;
                         try
                         {
-                            maybeResponse = ReceiveWithResponseStart(_options.P2Client, cancellationToken);
+                            maybeResponse = ReceiveWithResponseStart(cts.Token, cancellationToken);
                         }
                         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                         {
@@ -232,8 +233,13 @@ public sealed class UdsClient : IUdsClient
     private ReadOnlyMemory<byte> ReceiveWithResponseStart(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
     {
         using var cts = new LinkedCts(responseStartTimeout, cancellationToken);
+        return ReceiveWithResponseStart(cts.Token, cancellationToken);
+    }
+
+    private ReadOnlyMemory<byte> ReceiveWithResponseStart(CancellationToken responseStartCancellationToken, CancellationToken cancellationToken)
+    {
         return _receiveWithResponseStart is not null
-            ? _receiveWithResponseStart(cts.Token, cancellationToken)
-            : _receive(cts.Token);
+            ? _receiveWithResponseStart(responseStartCancellationToken, cancellationToken)
+            : _receive(responseStartCancellationToken);
     }
 }
