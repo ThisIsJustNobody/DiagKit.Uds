@@ -178,21 +178,25 @@ public class UdsClientTests
             WaitWhileSuppressingResponse = true,
             StrictServiceIdMatching = false,
         };
+        var receives = 0;
         var client = new UdsClient(
             (_, _) => { },
             ct =>
             {
-                if (ct.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(10)))
-                    ct.ThrowIfCancellationRequested();
+                if (Interlocked.Increment(ref receives) == 1)
+                    return new byte[] { 0x50, 0x03 };
+                ct.WaitHandle.WaitOne();
+                ct.ThrowIfCancellationRequested();
                 return new byte[] { 0x50, 0x03 };
             },
             options: options);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         var sw = Stopwatch.StartNew();
-        var resp = client.SendRequest(new byte[] { 0x3E, 0x80 }, cancellationToken: cts.Token);
+        var requestTask = Task.Run(() => client.SendRequest(new byte[] { 0x3E, 0x80 }, cancellationToken: CancellationToken.None));
+        var resp = requestTask.WaitAsync(TimeSpan.FromSeconds(3), TestContext.CancellationToken).GetAwaiter().GetResult();
 
         Assert.IsTrue(resp.IsEmpty);
+        Assert.IsGreaterThanOrEqualTo(2, receives);
         Assert.IsTrue(sw.Elapsed < TimeSpan.FromMilliseconds(250));
     }
 

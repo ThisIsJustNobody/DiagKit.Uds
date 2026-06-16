@@ -373,20 +373,25 @@ public class AsyncUdsClientTests
             WaitWhileSuppressingResponse = true,
             StrictServiceIdMatching = false,
         };
+        var receives = 0;
         var client = new AsyncUdsClient(
             (_, _) => Task.CompletedTask,
-            async ct =>
+            ct =>
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(10), ct);
-                return new byte[] { 0x50, 0x03 };
+                if (Interlocked.Increment(ref receives) == 1)
+                    return Task.FromResult<ReadOnlyMemory<byte>>(new byte[] { 0x50, 0x03 });
+                ct.WaitHandle.WaitOne();
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult<ReadOnlyMemory<byte>>(new byte[] { 0x50, 0x03 });
             },
             options: options);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         var sw = Stopwatch.StartNew();
-        var resp = await client.SendRequestAsync(new byte[] { 0x3E, 0x80 }, cancellationToken: cts.Token);
+        var resp = await client.SendRequestAsync(new byte[] { 0x3E, 0x80 }, cancellationToken: CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(3), TestContext.CancellationToken);
 
         Assert.IsTrue(resp.IsEmpty);
+        Assert.IsGreaterThanOrEqualTo(2, receives);
         Assert.IsTrue(sw.Elapsed < TimeSpan.FromMilliseconds(250));
     }
 

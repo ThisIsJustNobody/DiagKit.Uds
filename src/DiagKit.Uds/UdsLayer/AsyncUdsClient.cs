@@ -208,7 +208,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
 
         while (true)
         {
-            var wait = GetNextRc78Wait();
+            var wait = GetNextRc78Wait(out var boundedByCompletionTimeout);
             ReadOnlyMemory<byte> response;
             try
             {
@@ -216,7 +216,7 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                if (overall.Elapsed >= _options.Rc78CompletionTimeout)
+                if (boundedByCompletionTimeout || overall.Elapsed >= _options.Rc78CompletionTimeout)
                     throw UdsClientResponseHandling.CreateRc78Exceeded(_options);
                 throw new ProtocolException($"Timeout waiting for final response after RC 0x78 (P2* = {_options.P2ClientExtended.TotalMilliseconds:F0} ms).");
             }
@@ -238,8 +238,8 @@ public sealed class AsyncUdsClient : IAsyncUdsClient
             return response;
         }
 
-        TimeSpan GetNextRc78Wait()
-            => UdsClientResponseHandling.GetNextRc78Wait(_options, overall);
+        TimeSpan GetNextRc78Wait(out bool boundedByCompletionTimeout)
+            => UdsClientResponseHandling.GetNextRc78Wait(_options, overall, out boundedByCompletionTimeout);
     }
 
     private async Task<ReadOnlyMemory<byte>> ReceiveWithResponseStartAsync(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
