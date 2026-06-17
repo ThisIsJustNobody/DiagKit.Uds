@@ -33,11 +33,15 @@ internal static class UdsClientResponseHandling
             && (NegativeResponseCode)response[2] == NegativeResponseCode.BusyRepeatRequest;
 
     public static TimeSpan GetNextRc78Wait(UdsOptions options, Stopwatch overall)
+        => GetNextRc78Wait(options, overall, out _);
+
+    public static TimeSpan GetNextRc78Wait(UdsOptions options, Stopwatch overall, out bool boundedByCompletionTimeout)
     {
         var remaining = options.Rc78CompletionTimeout - overall.Elapsed;
         if (remaining <= TimeSpan.Zero)
             throw CreateRc78Exceeded(options);
-        return remaining < options.P2ClientExtended ? remaining : options.P2ClientExtended;
+        boundedByCompletionTimeout = remaining < options.P2ClientExtended;
+        return boundedByCompletionTimeout ? remaining : options.P2ClientExtended;
     }
 
     public static ProtocolException CreateRc78Exceeded(UdsOptions options)

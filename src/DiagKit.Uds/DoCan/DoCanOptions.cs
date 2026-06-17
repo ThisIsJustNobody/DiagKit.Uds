@@ -103,9 +103,14 @@ public sealed class DoCanOptions
     public TimeSpan TimeoutAs { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// 等待接收帧超时（接收方）。ISO 参数：N_Ar。<br/>Timeout waiting for a frame (receiver side). ISO: N_Ar.
+    /// Receiver-side CAN N-PDU transmission timeout, typically for flow-control frames. ISO: N_Ar.
     /// </summary>
     public TimeSpan TimeoutAr { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Standalone receive timeout for the first matching SF/FF. If null, <see cref="TimeoutAr"/> is used for backward compatibility.
+    /// </summary>
+    public TimeSpan? ReceiveStartTimeout { get; set; }
 
     /// <summary>
     /// 等待下一个流控帧超时。ISO 参数：N_Bs。<br/>Timeout waiting for the next flow control frame. ISO: N_Bs.
@@ -163,6 +168,7 @@ public sealed class DoCanOptions
         STmin = STmin,
         TimeoutAs = TimeoutAs,
         TimeoutAr = TimeoutAr,
+        ReceiveStartTimeout = ReceiveStartTimeout,
         TimeoutBs = TimeoutBs,
         TimeBr = TimeBr,
         TimeCs = TimeCs,
@@ -189,6 +195,8 @@ public sealed class DoCanOptions
 
         ValidatePositiveTimeout(TimeoutAs, nameof(TimeoutAs));
         ValidatePositiveTimeout(TimeoutAr, nameof(TimeoutAr));
+        if (ReceiveStartTimeout.HasValue)
+            ValidatePositiveTimeout(ReceiveStartTimeout.Value, nameof(ReceiveStartTimeout));
         ValidatePositiveTimeout(TimeoutBs, nameof(TimeoutBs));
         ValidatePositiveTimeout(TimeoutCr, nameof(TimeoutCr));
         ValidateNonNegative(TimeBr, nameof(TimeBr));

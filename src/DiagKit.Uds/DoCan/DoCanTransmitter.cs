@@ -20,7 +20,7 @@ namespace DiagKit.Uds.DoCan;
 /// A single instance multiplexes one conversation at a time. Concurrent calls are
 /// rejected with <see cref="InvalidOperationException"/>.
 /// </remarks>
-public sealed class DoCanTransmitter : ITransmitter<ReadOnlyMemory<byte>>
+public sealed class DoCanTransmitter : IResponseStartAwareTransmitter<ReadOnlyMemory<byte>>
 {
     private readonly Action<CanFrame, CancellationToken> _send;
     private readonly Func<CancellationToken, CanFrame> _receive;
@@ -102,7 +102,18 @@ public sealed class DoCanTransmitter : ITransmitter<ReadOnlyMemory<byte>>
     {
         if (!_gate.Wait(0, cancellationToken))
             throw new InvalidOperationException("A DoCAN transmission is already in progress.");
-        try { return ReceiveContent(cancellationToken); }
+        try { return ReceiveContent(cancellationToken, cancellationToken, _options.ReceiveStartTimeout ?? _options.TimeoutAr); }
+        finally { _gate.Release(); }
+    }
+
+    /// <inheritdoc/>
+    public ReadOnlyMemory<byte> Receive(
+        CancellationToken responseStartCancellationToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_gate.Wait(0, cancellationToken))
+            throw new InvalidOperationException("A DoCAN transmission is already in progress.");
+        try { return ReceiveContent(responseStartCancellationToken, cancellationToken, receiveStartTimeout: null); }
         finally { _gate.Release(); }
     }
 
@@ -213,13 +224,25 @@ public sealed class DoCanTransmitter : ITransmitter<ReadOnlyMemory<byte>>
 
     // ─── Receive side ───────────────────────────────────────────────────
 
-    private ReadOnlyMemory<byte> ReceiveContent(CancellationToken ct)
+    private ReadOnlyMemory<byte> ReceiveContent(
+        CancellationToken responseStartCt,
+        CancellationToken ct,
+        TimeSpan? receiveStartTimeout)
     {
         var options = _options;
 
         CanFrame first;
-        using (var cts = new LinkedCts(options.TimeoutAr, ct))
+        if (receiveStartTimeout.HasValue)
+        {
+            using var receiveStartTimeoutCts = new CancellationTokenSource(receiveStartTimeout.Value);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(receiveStartTimeoutCts.Token, responseStartCt, ct);
             first = ReceiveMatchingFrame(cts.Token);
+        }
+        else
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(responseStartCt, ct);
+            first = ReceiveMatchingFrame(cts.Token);
+        }
 
         var type = DoCanFraming.GetFrameType(first.Data.Span);
         switch (type)
@@ -250,7 +273,7 @@ public sealed class DoCanTransmitter : ITransmitter<ReadOnlyMemory<byte>>
             if (totalLength > options.MaxSegmentedPayloadLength)
             {
                 DoCanFraming.EncodeFlowControlFrame(fcRent.AsSpan(0, fcDlc), DoCanFlowStatus.Overflow, options.BlockSize, options.STmin, fcDlc, options.PaddingValue);
-                using (var cts = new LinkedCts(options.TimeoutAs, ct))
+                using (var cts = new LinkedCts(options.TimeoutAr, ct))
                     _send(MakeRequestFrame(fcRent.AsMemory(0, fcDlc)), cts.Token);
                 throw new ProtocolException($"Segmented message length {totalLength} exceeds MaxSegmentedPayloadLength {options.MaxSegmentedPayloadLength}.");
             }
@@ -267,7 +290,7 @@ public sealed class DoCanTransmitter : ITransmitter<ReadOnlyMemory<byte>>
                     Sleep(options.TimeBr, ct);
 
                 DoCanFraming.EncodeFlowControlFrame(fcRent.AsSpan(0, fcDlc), DoCanFlowStatus.Continue, options.BlockSize, options.STmin, fcDlc, options.PaddingValue);
-                using (var cts = new LinkedCts(options.TimeoutAs, ct))
+                using (var cts = new LinkedCts(options.TimeoutAr, ct))
                     _send(MakeRequestFrame(fcRent.AsMemory(0, fcDlc)), cts.Token);
 
                 int block = 0;

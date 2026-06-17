@@ -62,6 +62,199 @@ public class ServicesTests
     }
 
     [TestMethod]
+    public async Task EcuReset_BuildParseInvoke_ValidatesEcho()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x51, 0x03 });
+
+        var request = EcuReset.BuildRequest(EcuResetType.SoftReset, suppressPositiveResponse: true);
+        var response = EcuReset.ParseResponse([0x51, 0x03], EcuResetType.SoftReset);
+        var invoked = await EcuReset.InvokeAsync(
+            client,
+            EcuResetType.SoftReset,
+            cancellationToken: TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x11, 0x83 }, request);
+        Assert.AreEqual(EcuResetType.SoftReset, response.ResetType);
+        Assert.IsNull(response.PowerDownTime);
+        Assert.AreEqual(EcuResetType.SoftReset, invoked.ResetType);
+        CollectionAssert.AreEqual(new byte[] { 0x11, 0x03 }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            EcuReset.ParseResponse([0x51, 0x01], EcuResetType.SoftReset));
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            EcuReset.ParseResponse([0x51, 0x83], EcuResetType.SoftReset));
+        Assert.ThrowsExactly<FrameFormatException>(() =>
+            EcuReset.ParseResponse([0x51, 0x03, 0xAA], EcuResetType.SoftReset));
+        Assert.AreEqual((byte)0xAA, EcuReset.ParseResponse([0x51, 0x04, 0xAA], EcuResetType.EnableRapidPowerShutdown).PowerDownTime);
+    }
+
+    [TestMethod]
+    public async Task CommunicationControl_BuildParseInvoke_ValidatesEcho()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x68, 0x03 });
+
+        var request = CommunicationControl.BuildRequest(
+            CommunicationControlType.DisableRxAndTx,
+            communicationType: 0x02,
+            communicationControlRecord: [0x12, 0x34],
+            suppressPositiveResponse: true);
+        var response = CommunicationControl.ParseResponse([0x68, 0x03], CommunicationControlType.DisableRxAndTx);
+        var invoked = await CommunicationControl.InvokeAsync(
+            client,
+            CommunicationControlType.DisableRxAndTx,
+            communicationType: 0x02,
+            cancellationToken: TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x28, 0x83, 0x02, 0x12, 0x34 }, request);
+        Assert.AreEqual(CommunicationControlType.DisableRxAndTx, response.ControlType);
+        Assert.AreEqual(CommunicationControlType.DisableRxAndTx, invoked.ControlType);
+        CollectionAssert.AreEqual(new byte[] { 0x28, 0x03, 0x02 }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            CommunicationControl.ParseResponse([0x68, 0x02], CommunicationControlType.DisableRxAndTx));
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            CommunicationControl.ParseResponse([0x68, 0x83], CommunicationControlType.DisableRxAndTx));
+        Assert.ThrowsExactly<FrameFormatException>(() =>
+            CommunicationControl.ParseResponse([0x68, 0x03, 0x00], CommunicationControlType.DisableRxAndTx));
+    }
+
+    [TestMethod]
+    public async Task CommunicationControl_Invoke_AllowsCancellationTokenWithoutRecord()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x68, 0x00 });
+
+        var response = await CommunicationControl.InvokeAsync(
+            client,
+            CommunicationControlType.EnableRxAndTx,
+            communicationType: 0x01,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(CommunicationControlType.EnableRxAndTx, response.ControlType);
+        CollectionAssert.AreEqual(new byte[] { 0x28, 0x00, 0x01 }, ((StubAsyncUdsClient)client).Requests[0]);
+    }
+
+    [TestMethod]
+    public async Task ControlDtcSetting_BuildParseInvoke_ValidatesEcho()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0xC5, 0x02 });
+
+        var request = ControlDtcSetting.BuildRequest(
+            DtcSettingType.Off,
+            dtcSettingControlOptionRecord: [0xAA],
+            suppressPositiveResponse: true);
+        var response = ControlDtcSetting.ParseResponse([0xC5, 0x02], DtcSettingType.Off);
+        var invoked = await ControlDtcSetting.InvokeAsync(
+            client,
+            DtcSettingType.Off,
+            cancellationToken: TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x85, 0x82, 0xAA }, request);
+        Assert.AreEqual(DtcSettingType.Off, response.SettingType);
+        Assert.AreEqual(DtcSettingType.Off, invoked.SettingType);
+        CollectionAssert.AreEqual(new byte[] { 0x85, 0x02 }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            ControlDtcSetting.ParseResponse([0xC5, 0x01], DtcSettingType.Off));
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            ControlDtcSetting.ParseResponse([0xC5, 0x82], DtcSettingType.Off));
+        Assert.ThrowsExactly<FrameFormatException>(() =>
+            ControlDtcSetting.ParseResponse([0xC5, 0x02, 0x00], DtcSettingType.Off));
+    }
+
+    [TestMethod]
+    public async Task ClearDiagnosticInformation_BuildParseInvoke_UsesThreeByteGroup()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x54 });
+
+        var request = ClearDiagnosticInformation.BuildRequest(0x00FFAA);
+        var response = ClearDiagnosticInformation.ParseResponse([0x54]);
+        var invoked = await ClearDiagnosticInformation.InvokeAsync(
+            client,
+            0x00FFAA,
+            TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x14, 0x00, 0xFF, 0xAA }, request);
+        Assert.AreEqual(default(ClearDiagnosticInformation.Response), response);
+        Assert.AreEqual(default(ClearDiagnosticInformation.Response), invoked);
+        CollectionAssert.AreEqual(new byte[] { 0x14, 0x00, 0xFF, 0xAA }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            ClearDiagnosticInformation.BuildRequest(0x01000000));
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            ClearDiagnosticInformation.ParseResponse([0x53]));
+        Assert.ThrowsExactly<FrameFormatException>(() =>
+            ClearDiagnosticInformation.ParseResponse([0x54, 0x12]));
+    }
+
+    [TestMethod]
+    public async Task WriteDataByIdentifier_BuildParseInvoke_ValidatesEcho()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x6E, 0xF1, 0x90 });
+
+        var request = WriteDataByIdentifier.BuildRequest(0xF190, [0x12, 0x34]);
+        var response = WriteDataByIdentifier.ParseResponse([0x6E, 0xF1, 0x90], 0xF190);
+        var invoked = await WriteDataByIdentifier.InvokeAsync(
+            client,
+            0xF190,
+            new byte[] { 0x12, 0x34 },
+            TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x2E, 0xF1, 0x90, 0x12, 0x34 }, request);
+        Assert.AreEqual(0xF190, response.DataIdentifier);
+        Assert.AreEqual(0xF190, invoked.DataIdentifier);
+        CollectionAssert.AreEqual(new byte[] { 0x2E, 0xF1, 0x90, 0x12, 0x34 }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            WriteDataByIdentifier.ParseResponse([0x6E, 0xF1, 0x91], 0xF190));
+    }
+
+    [TestMethod]
+    public async Task InputOutputControlByIdentifier_BuildParseInvoke_ValidatesEcho()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x6F, 0xF1, 0x90, 0x03, 0xAA });
+
+        var request = InputOutputControlByIdentifier.BuildRequest(
+            0xF190,
+            InputOutputControlParameter.ShortTermAdjustment,
+            controlStateAndMaskRecord: [0x12, 0x34]);
+        var response = InputOutputControlByIdentifier.ParseResponse(
+            [0x6F, 0xF1, 0x90, 0x03, 0xAA],
+            0xF190,
+            InputOutputControlParameter.ShortTermAdjustment);
+        var invoked = await InputOutputControlByIdentifier.InvokeAsync(
+            client,
+            0xF190,
+            InputOutputControlParameter.ShortTermAdjustment,
+            new byte[] { 0x12, 0x34 },
+            TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new byte[] { 0x2F, 0xF1, 0x90, 0x03, 0x12, 0x34 }, request);
+        Assert.AreEqual(0xF190, response.DataIdentifier);
+        Assert.AreEqual(InputOutputControlParameter.ShortTermAdjustment, response.ControlParameter);
+        CollectionAssert.AreEqual(new byte[] { 0xAA }, response.ControlStatusRecord.ToArray());
+        Assert.AreEqual(0xF190, invoked.DataIdentifier);
+        Assert.AreEqual(InputOutputControlParameter.ShortTermAdjustment, invoked.ControlParameter);
+        CollectionAssert.AreEqual(new byte[] { 0x2F, 0xF1, 0x90, 0x03, 0x12, 0x34 }, ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            InputOutputControlByIdentifier.ParseResponse([0x6F, 0xF1, 0x91, 0x03], 0xF190));
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            InputOutputControlByIdentifier.ParseResponse(
+                [0x6F, 0xF1, 0x90, 0x02],
+                0xF190,
+                InputOutputControlParameter.ShortTermAdjustment));
+    }
+
+    [TestMethod]
+    public async Task InputOutputControlByIdentifier_Invoke_AllowsCancellationTokenWithoutRecord()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient(new byte[] { 0x6F, 0xF1, 0x90, 0x00 });
+
+        var response = await InputOutputControlByIdentifier.InvokeAsync(
+            client,
+            0xF190,
+            InputOutputControlParameter.ReturnControlToEcu,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(InputOutputControlParameter.ReturnControlToEcu, response.ControlParameter);
+        CollectionAssert.AreEqual(new byte[] { 0x2F, 0xF1, 0x90, 0x00 }, ((StubAsyncUdsClient)client).Requests[0]);
+    }
+
+    [TestMethod]
     public void TesterPresentBuildRequest_ReturnsFreshArrays()
     {
         var first = TesterPresent.BuildRequest();

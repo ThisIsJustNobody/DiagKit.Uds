@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 
 using DiagKit.Uds.Exceptions;
 using DiagKit.Uds.UdsLayer;
@@ -11,14 +13,16 @@ namespace DiagKit.Uds.Tests;
 [TestClass]
 public class UdsClientTests
 {
-    private static (UdsClient client, BlockingCollection<ReadOnlyMemory<byte>> outgoing, BlockingCollection<ReadOnlyMemory<byte>> incoming) BuildClient(UdsOptions? options = null)
+    private static (UdsClient client, BlockingCollection<ReadOnlyMemory<byte>> outgoing, BlockingCollection<ReadOnlyMemory<byte>> incoming) BuildClient(
+        UdsOptions? options = null,
+        Action? clearReceiveBuffer = null)
     {
         var outgoing = new BlockingCollection<ReadOnlyMemory<byte>>();
         var incoming = new BlockingCollection<ReadOnlyMemory<byte>>();
         var client = new UdsClient(
             (data, ct) => outgoing.Add(data, ct),
             ct => incoming.Take(ct),
-            null,
+            clearReceiveBuffer,
             options);
         return (client, outgoing, incoming);
     }
@@ -47,6 +51,59 @@ public class UdsClientTests
 
         Assert.AreEqual(NegativeResponseCode.ConditionsNotCorrect, ex.Code);
         Assert.AreEqual(0x10, ex.ServiceId);
+    }
+
+    [TestMethod]
+    public void ClearReceiveBufferBeforeRequest_DrainsStalePayloadBeforeFirstSend()
+    {
+        var outgoing = new BlockingCollection<ReadOnlyMemory<byte>>();
+        var incoming = new BlockingCollection<ReadOnlyMemory<byte>>();
+        incoming.Add(new byte[] { 0x62, 0xF1, 0x90, 0xAA });
+        var clearCalls = 0;
+        void Clear()
+        {
+            clearCalls++;
+            while (incoming.TryTake(out _))
+            {
+            }
+        }
+
+        var client = new UdsClient(
+            (data, ct) => outgoing.Add(data, ct),
+            ct => incoming.Take(ct),
+            Clear,
+            new UdsOptions { P2Client = TimeSpan.FromMilliseconds(500) });
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var responseTask = Task.Run(() => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, cts.Token), cts.Token);
+        Assert.IsTrue(outgoing.TryTake(out var sent, TimeSpan.FromMilliseconds(500)));
+        incoming.Add(new byte[] { 0x62, 0xF1, 0x90, 0xBB });
+
+        var response = responseTask.GetAwaiter().GetResult();
+
+        Assert.AreEqual(1, clearCalls);
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, sent.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0xBB }, response.ToArray());
+    }
+
+    [TestMethod]
+    public void ClearReceiveBufferBeforeRequest_False_DoesNotDrainStalePayload()
+    {
+        var clearCalls = 0;
+        var options = new UdsOptions
+        {
+            ClearReceiveBufferBeforeRequest = false,
+            P2Client = TimeSpan.FromMilliseconds(500),
+        };
+        var (client, outgoing, incoming) = BuildClient(options, () => clearCalls++);
+        incoming.Add(new byte[] { 0x62, 0xF1, 0x90, 0xAA });
+
+        var response = client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, clearCalls);
+        Assert.IsTrue(outgoing.TryTake(out var sent, TimeSpan.FromMilliseconds(100)));
+        CollectionAssert.AreEqual(new byte[] { 0x22, 0xF1, 0x90 }, sent.ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0x62, 0xF1, 0x90, 0xAA }, response.ToArray());
     }
 
     [TestMethod]
@@ -113,6 +170,35 @@ public class UdsClientTests
     }
 
     [TestMethod]
+    public void SuppressedRequest_NonMatchingResponsesDoNotExtendP2Window()
+    {
+        var options = new UdsOptions
+        {
+            P2Client = TimeSpan.FromMilliseconds(50),
+            WaitWhileSuppressingResponse = true,
+            StrictServiceIdMatching = false,
+        };
+        var receives = 0;
+        var client = new UdsClient(
+            (_, _) => { },
+            ct =>
+            {
+                if (Interlocked.Increment(ref receives) == 1)
+                    return new byte[] { 0x50, 0x03 };
+                ct.WaitHandle.WaitOne();
+                ct.ThrowIfCancellationRequested();
+                return new byte[] { 0x50, 0x03 };
+            },
+            options: options);
+
+        var requestTask = Task.Run(() => client.SendRequest(new byte[] { 0x3E, 0x80 }, cancellationToken: CancellationToken.None));
+        var resp = requestTask.WaitAsync(TimeSpan.FromSeconds(3), TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        Assert.IsTrue(resp.IsEmpty);
+        Assert.IsGreaterThanOrEqualTo(2, receives);
+    }
+
+    [TestMethod]
     public void SuppressedRequest_NonMatchingResponseThrowsInStrictMode()
     {
         var options = new UdsOptions
@@ -149,19 +235,20 @@ public class UdsClientTests
         var options = new UdsOptions
         {
             P2Client = TimeSpan.FromMilliseconds(200),
-            P2ClientExtended = TimeSpan.FromSeconds(2),
+            P2ClientExtended = TimeSpan.FromSeconds(5),
             Rc78Handling = Rc78Handling.WaitForCompletion,
-            Rc78CompletionTimeout = TimeSpan.FromMilliseconds(150),
+            Rc78CompletionTimeout = TimeSpan.FromMilliseconds(500),
         };
         var (client, _, incoming) = BuildClient(options);
         incoming.Add(new byte[] { 0x7F, 0x22, 0x78 });
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var elapsed = Stopwatch.StartNew();
-        Assert.ThrowsExactly<ProtocolException>(
-            () => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, cts.Token));
+        var requestTask = Task.Run(() => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, CancellationToken.None));
+        var ex = Assert.ThrowsExactly<ProtocolException>(
+            () => requestTask.WaitAsync(TimeSpan.FromSeconds(6), TestContext.CancellationToken).GetAwaiter().GetResult());
 
-        Assert.IsLessThan(TimeSpan.FromSeconds(1), elapsed.Elapsed, $"Elapsed {elapsed.Elapsed} should be bounded by Rc78CompletionTimeout, not P2*.");
+        StringAssert.Contains(ex.Message, "RC 0x78 kept");
+        Assert.IsLessThan(TimeSpan.FromSeconds(2), elapsed.Elapsed, $"Elapsed {elapsed.Elapsed} should be bounded by Rc78CompletionTimeout, not P2*.");
     }
 
     [TestMethod]
@@ -219,6 +306,23 @@ public class UdsClientTests
         Assert.IsTrue(outgoing.TryTake(out _, TimeSpan.FromMilliseconds(100)));
         Assert.IsTrue(outgoing.TryTake(out _, TimeSpan.FromMilliseconds(100)));
         Assert.IsFalse(outgoing.TryTake(out _));
+    }
+
+    [TestMethod]
+    public void LifecycleHook_RunsEndOnTimeout()
+    {
+        var lifecycle = new List<string>();
+        var options = new UdsOptions
+        {
+            P2Client = TimeSpan.FromMilliseconds(20),
+            InitializeOrClearUpAction = started => lifecycle.Add(started ? "start" : "end"),
+        };
+        var (client, _, _) = BuildClient(options);
+
+        Assert.ThrowsExactly<ProtocolException>(
+            () => client.SendRequest(new byte[] { 0x22, 0xF1, 0x90 }, false, TestContext.CancellationToken));
+
+        CollectionAssert.AreEqual(new[] { "start", "end" }, lifecycle);
     }
 
     [TestMethod]

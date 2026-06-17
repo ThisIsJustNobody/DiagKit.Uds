@@ -18,7 +18,7 @@ ISO 13400）协议栈的汽车 ECU 诊断通信，无外部依赖。
 - **NRC 自动处理** — RC 0x78（ResponsePending）与 RC 0x21（BusyRepeatRequest）内建状态机，超时可配置。
 - **可插拔传输层** — 支持原始发送/接收 `Func`/`Action` 委托、`IAsyncTransmitter<T>`/`ITransmitter<T>` 实例，或直接传入 `Channel<T>` / `BlockingCollection<T>`。
 - **内置服务端** — `AsyncUdsServer` 将入站请求分发到各 SID 处理器，内建 NRC 支持。
-- **常用服务辅助类** — DiagnosticSessionControl、TesterPresent（含心跳保活）、SecurityAccess（种子/密钥）、ReadDataByIdentifier、RoutineControl、ReadDtcInformation、RequestDownload、TransferData、RequestTransferExit。
+- **常用服务辅助类** — DiagnosticSessionControl、ECUReset、TesterPresent（含心跳保活）、SecurityAccess（种子/密钥）、ReadDataByIdentifier、WriteDataByIdentifier、RoutineControl、DTC 服务、InputOutputControlByIdentifier、RequestDownload/Upload、TransferData、RequestTransferExit。
 
 ## 架构
 
@@ -27,7 +27,8 @@ ISO 13400）协议栈的汽车 ECU 诊断通信，无外部依赖。
 │  应用层                                                     │
 │  Services.DiagnosticSessionControl, TesterPresent,         │
 │           SecurityAccess, ReadDataByIdentifier,            │
-│           RoutineControl, ReadDtcInformation               │
+│           WriteDataByIdentifier, RoutineControl, DTC,      │
+│           IO control, flashing helpers                     │
 ├────────────────────────────────────────────────────────────┤
 │  UDS 应用层（UdsLayer）                                     │
 │  AsyncUdsClient / UdsClient        AsyncUdsServer          │
@@ -173,6 +174,14 @@ await TransferData.SendBlocksAsync(
 
 await RequestTransferExit.InvokeAsync(client);
 
+// 上传侧协商与 RequestDownload 对称。
+var upload = await RequestUpload.InvokeAsync(client,
+    dataFormatIdentifier: 0x00,
+    memoryAddress: 0x00040000,
+    memorySize: 0x1000,
+    memoryAddressLength: 4,
+    memorySizeLength: 4);
+
 var erase = await RoutineControl.StartAndExpectCompletedAsync(
     client,
     routineId: 0xFF00,
@@ -217,7 +226,7 @@ await using var client = new UdsClientSession(udsClient, new UdsClientSessionOpt
 
 ## 服务端（模拟器 / ECU 桩）
 
-`UdsEcuSimulator` 是构建 ECU 测试替身的最简便方式。它维护 ECU 风格的状态，并内建常用服务：DiagnosticSessionControl、TesterPresent、ReadDataByIdentifier、SecurityAccess、RoutineControl、ReadDTCInformation。
+`UdsEcuSimulator` 是构建 ECU 测试替身的最简便方式。它维护 ECU 风格的状态，并内建常用服务：DiagnosticSessionControl、TesterPresent、ReadDataByIdentifier、WriteDataByIdentifier、SecurityAccess、RoutineControl、ReadDTCInformation、ClearDiagnosticInformation、ECUReset、ControlDTCSetting。CommunicationControl、InputOutputControlByIdentifier、RequestUpload 等目前是客户端辅助类；如需模拟器行为，可自行注册处理器。
 
 ```csharp
 var simulator = new UdsEcuSimulator(transport);
@@ -305,7 +314,9 @@ byte[] vin = await ReadDataByIdentifier.InvokeAsync(client, 0xF190);
 | `PaddingValue` | `0xCC` | 标准汽车行业填充值。 |
 | `BlockSize` | `0` | 接收方 FC 块大小（0 = 无限制）。 |
 | `STmin` | `0` | 接收方最小帧间隔。 |
-| `TimeoutAs` / `Ar` / `Bs` / `Cr` | `1 s` | ISO 15765 时序预算。 |
+| `TimeoutAs` / `TimeoutAr` | `1 s` | N_As / N_Ar N-PDU transmit budgets. |
+| `TimeoutBs` / `TimeoutCr` | `1 s` | N_Bs waits for FC; N_Cr waits for each next CF, not the whole response. |
+| `ReceiveStartTimeout` | `null` | Optional standalone DoCAN receive timeout for the first matching SF/FF; null keeps the legacy `TimeoutAr` default. |
 | `FlowControlWaitInterval` | `10 ms` | FC Wait 期间回退间隔。 |
 | `MaxFlowControlWaitFrames` | `8` | 过多 FC Wait 帧后中止分段发送。 |
 | `FrameMixingMode` | `Strict` | 与非 FD 帧的共存策略。 |
@@ -314,14 +325,20 @@ byte[] vin = await ReadDataByIdentifier.InvokeAsync(client, 0xF190);
 
 | 属性 | 默认值 | 说明 |
 | --- | --- | --- |
-| `P2Client` | `150 ms` | 初始响应超时。 |
-| `P2ClientExtended` | `5 s` | RC 0x78 后的扩展超时。 |
+| `P2Client` | `150 ms` | UDS response-start timeout. For DoCAN, P2 stops once SF or FF arrives. |
+| `P2ClientExtended` | `5 s` | Response-start timeout after RC 0x78. DoCAN CF reassembly is governed by N_Cr/STmin/BS after FF. |
 | `Rc78Handling` | `WaitForCompletion` | 或 `ReturnImmediately`。 |
 | `Rc78CompletionTimeout` | `25 s` | RC 0x78 重试总预算。 |
 | `Rc21Handling` | `ReturnImmediately` | 或 `Retry`。 |
 | `Rc21RetryInterval` | `200 ms` | 重试间隔。 |
 | `WaitWhileSuppressingResponse` | `true` | 捕获被抑制请求的否定响应。 |
 | `StrictServiceIdMatching` | `false` | 静默丢弃不匹配的响应。 |
+| `ClearReceiveBufferBeforeRequest` | `true` | 获取 UDS 请求 gate 后、首次发送前清空底层接收缓存。 |
+| `InitializeOrClearUpAction` | `null` | 可选请求生命周期钩子；`true` 表示事务开始，`false` 表示清理阶段。 |
+
+`ClearReceiveBufferBeforeRequest` 和 `InitializeOrClearUpAction` 每次
+`SendRequest` / `SendRequestAsync` 只触发一次。内部 RC 0x21 重试复用同一个
+请求事务，不会重新进入生命周期钩子。
 
 ## 构建与测试
 
@@ -342,7 +359,7 @@ src/
     ├── DoIp/        # ISO 13400 流式/消息传输
     ├── Exceptions/  # UdsException 层级
     ├── Internal/    # LinkedCts（超时感知取消链接器）
-    ├── Services/    # SID 0x10、0x22、0x27、0x31、0x3E、0x19 辅助类
+    ├── Services/    # 常用 ISO 14229 服务 ID 辅助类
     └── UdsLayer/    # UDS 客户端/服务端/会话/模拟器
 tests/
 └── DiagKit.Uds.Tests/   # MSTest v4 套件

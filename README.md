@@ -19,7 +19,7 @@ Zero external NuGet dependencies.
 - **Robust NRC handling** — automatic state machines for RC 0x78 (ResponsePending) and RC 0x21 (BusyRepeatRequest)
 - **Pluggable transport** — accepts delegates, `Channel<T>`, `BlockingCollection<T>`, or custom transmitters
 - **Server side included** — `AsyncUdsServer` dispatcher and `UdsEcuSimulator` for testing
-- **Helpers for common services** — SessionControl, TesterPresent, SecurityAccess, ReadDataByIdentifier, RoutineControl, ReadDtcInformation, RequestDownload, TransferData, RequestTransferExit
+- **Helpers for common services** — SessionControl, ECUReset, TesterPresent, SecurityAccess, ReadDataByIdentifier, WriteDataByIdentifier, RoutineControl, DTC services, IO control, RequestDownload/Upload, TransferData, RequestTransferExit
 
 ## Installation
 

@@ -110,6 +110,22 @@ public class OptionsTests
     }
 
     [TestMethod]
+    public void UdsOptionsClone_CopiesRequestLifecycleOptions()
+    {
+        Action<bool> lifecycle = _ => { };
+        var options = new UdsOptions
+        {
+            ClearReceiveBufferBeforeRequest = false,
+            InitializeOrClearUpAction = lifecycle,
+        };
+
+        var clone = options.Clone();
+
+        Assert.IsFalse(clone.ClearReceiveBufferBeforeRequest);
+        Assert.AreSame(lifecycle, clone.InitializeOrClearUpAction);
+    }
+
+    [TestMethod]
     public void InvalidDoCanOptions_ThrowDuringConstruction()
     {
         var outbound = Channel.CreateUnbounded<CanFrame>();
@@ -125,6 +141,31 @@ public class OptionsTests
         var outbound = Channel.CreateUnbounded<CanFrame>();
         var inbound = Channel.CreateUnbounded<CanFrame>();
         var options = new DoCanOptions { RequestId = 0x100, ResponseId = 0x101, TimeCs = TimeSpan.FromMilliseconds(-1) };
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new AsyncDoCanTransmitter(outbound, inbound, options));
+    }
+
+    [TestMethod]
+    public void DoCanOptions_CloneCopiesReceiveStartTimeout()
+    {
+        var options = new DoCanOptions
+        {
+            RequestId = 0x100,
+            ResponseId = 0x101,
+            ReceiveStartTimeout = TimeSpan.FromMilliseconds(250),
+        };
+
+        var clone = options.Clone();
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), clone.ReceiveStartTimeout);
+    }
+
+    [TestMethod]
+    public void InvalidDoCanOptions_ReceiveStartTimeout_ThrowsDuringConstruction()
+    {
+        var outbound = Channel.CreateUnbounded<CanFrame>();
+        var inbound = Channel.CreateUnbounded<CanFrame>();
+        var options = new DoCanOptions { RequestId = 0x100, ResponseId = 0x101, ReceiveStartTimeout = TimeSpan.Zero };
 
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new AsyncDoCanTransmitter(outbound, inbound, options));
     }

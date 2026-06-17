@@ -71,6 +71,54 @@ public class FlashServicesTests
     }
 
     [TestMethod]
+    public void RequestUpload_BuildRequest_EncodesAddressAndSize()
+    {
+        var request = RequestUpload.BuildRequest(
+            dataFormatIdentifier: 0x00,
+            memoryAddress: 0x2000,
+            memorySize: 0x0100,
+            memoryAddressLength: 4,
+            memorySizeLength: 2);
+
+        CollectionAssert.AreEqual(
+            new byte[] { 0x35, 0x00, 0x24, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00 },
+            request);
+    }
+
+    [TestMethod]
+    public void RequestUpload_ParseResponse_ReturnsBlockLengths()
+    {
+        var response = RequestUpload.ParseResponse([0x75, 0x20, 0x08, 0x02]);
+
+        Assert.AreEqual(0x0802UL, response.MaxNumberOfBlockLength);
+        Assert.AreEqual(0x0800, response.MaxTransferDataPayloadLength);
+    }
+
+    [TestMethod]
+    public async Task RequestUpload_InvokeAsync_ValidatesPositiveResponse()
+    {
+        IAsyncUdsClient client = new StubAsyncUdsClient([0x75, 0x20, 0x08, 0x02]);
+
+        var response = await RequestUpload.InvokeAsync(
+            client,
+            dataFormatIdentifier: 0x00,
+            memoryAddress: 0x2000,
+            memorySize: 0x0100,
+            memoryAddressLength: 4,
+            memorySizeLength: 2,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual(0x0802UL, response.MaxNumberOfBlockLength);
+        CollectionAssert.AreEqual(
+            new byte[] { 0x35, 0x00, 0x24, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00 },
+            ((StubAsyncUdsClient)client).Requests[0]);
+        Assert.ThrowsExactly<ProtocolException>(() =>
+            RequestUpload.ParseResponse([0x74, 0x20, 0x08, 0x02]));
+        Assert.ThrowsExactly<FrameFormatException>(() =>
+            RequestUpload.ParseResponse([0x75, 0x20, 0x08]));
+    }
+
+    [TestMethod]
     public void TransferData_BuildAndParse_ValidatesBlockSequenceCounter()
     {
         var request = TransferData.BuildRequest(0x7F, [0xAA, 0xBB]);

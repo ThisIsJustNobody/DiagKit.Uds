@@ -377,20 +377,21 @@ public class UdsClientSessionTests
     }
 
     private async Task<ClientInvocation> ReadInvocationAsync(RecordingAsyncUdsClient client)
-        => await ReadInvocationAsync(client, TimeSpan.FromMilliseconds(250));
+        => await ReadInvocationAsync(client, TimeSpan.FromSeconds(2));
 
     private async Task<ClientInvocation> ReadInvocationAsync(RecordingAsyncUdsClient client, TimeSpan timeout)
     {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, TestContext.CancellationToken);
+        try
         {
-            if (client.Invocations.Reader.TryRead(out var invocation))
-                return invocation;
-            await Task.Delay(TimeSpan.FromMilliseconds(5), TestContext.CancellationToken);
+            return await client.Invocations.Reader.ReadAsync(linkedCts.Token);
         }
-
-        Assert.Fail("Timed out waiting for a client invocation.");
-        return null!;
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !TestContext.CancellationToken.IsCancellationRequested)
+        {
+            Assert.Fail("Timed out waiting for a client invocation.");
+            return null!;
+        }
     }
 
     private async Task<ClientInvocation?> TryReadInvocationAsync(RecordingAsyncUdsClient client, TimeSpan timeout)

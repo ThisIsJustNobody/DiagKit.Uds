@@ -26,9 +26,10 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
   `BlockingCollection<T>` directly.
 - **Server side included** — `AsyncUdsServer` dispatches inbound requests to
   per-SID handlers with built-in NRC support.
-- **Helpers for common services** — DiagnosticSessionControl, TesterPresent
-  (with keep-alive), SecurityAccess (seed/key), ReadDataByIdentifier,
-  RoutineControl, ReadDtcInformation, RequestDownload, TransferData,
+- **Helpers for common services** — DiagnosticSessionControl, ECUReset,
+  TesterPresent (with keep-alive), SecurityAccess (seed/key),
+  ReadDataByIdentifier, WriteDataByIdentifier, RoutineControl, DTC services,
+  InputOutputControlByIdentifier, RequestDownload/Upload, TransferData,
   RequestTransferExit.
 
 ## Architecture
@@ -38,7 +39,8 @@ ISO 14229) over **DoCAN** (Diagnostics on CAN, ISO 15765) and **DoIP**
 │  Application                                               │
 │  Services.DiagnosticSessionControl, TesterPresent,         │
 │           SecurityAccess, ReadDataByIdentifier,            │
-│           RoutineControl, ReadDtcInformation               │
+│           WriteDataByIdentifier, RoutineControl, DTC,      │
+│           IO control, flashing helpers                     │
 ├────────────────────────────────────────────────────────────┤
 │  UDS application layer (UdsLayer)                          │
 │  AsyncUdsClient / UdsClient        AsyncUdsServer          │
@@ -185,6 +187,14 @@ await TransferData.SendBlocksAsync(
 
 await RequestTransferExit.InvokeAsync(client);
 
+// The upload-side negotiation mirrors RequestDownload.
+var upload = await RequestUpload.InvokeAsync(client,
+    dataFormatIdentifier: 0x00,
+    memoryAddress: 0x00040000,
+    memorySize: 0x1000,
+    memoryAddressLength: 4,
+    memorySizeLength: 4);
+
 var erase = await RoutineControl.StartAndExpectCompletedAsync(
     client,
     routineId: 0xFF00,
@@ -237,8 +247,11 @@ requests may be in flight, and do not enable it together with
 
 `UdsEcuSimulator` is the easiest way to build an ECU stand-in for tests. It
 keeps ECU-like state and includes common services such as DiagnosticSessionControl,
-TesterPresent, ReadDataByIdentifier, SecurityAccess, RoutineControl, and
-ReadDTCInformation.
+TesterPresent, ReadDataByIdentifier, WriteDataByIdentifier, SecurityAccess,
+RoutineControl, ReadDTCInformation, ClearDiagnosticInformation, ECUReset, and
+ControlDTCSetting. Other helpers such as CommunicationControl,
+InputOutputControlByIdentifier, and RequestUpload are client-side helpers only
+unless you register simulator handlers for them.
 
 ```csharp
 var simulator = new UdsEcuSimulator(transport);
@@ -345,7 +358,9 @@ handling rules but does not manage a TCP/TLS stream.
 | `PaddingValue` | `0xCC` | Standard automotive padding. |
 | `BlockSize` | `0` | Receiver-side FC block size (0 = unbounded). |
 | `STmin` | `0` | Receiver-side separation-time byte. |
-| `TimeoutAs` / `Ar` / `Bs` / `Cr` | `1 s` | ISO 15765 timing budgets. |
+| `TimeoutAs` / `TimeoutAr` | `1 s` | Sender-side N_As and receiver-side N_Ar N-PDU transmit budgets. |
+| `TimeoutBs` / `TimeoutCr` | `1 s` | Wait for FC (N_Bs) and next CF (N_Cr). N_Cr is per consecutive frame, not a whole-response timeout. |
+| `ReceiveStartTimeout` | `null` | Optional standalone DoCAN receive timeout for the first matching SF/FF; null preserves the legacy `TimeoutAr` default. |
 | `FlowControlWaitInterval` | `10 ms` | Back-off while FC Wait is active. |
 | `MaxFlowControlWaitFrames` | `8` | Abort segmented send after too many FC Wait frames. |
 | `FrameMixingMode` | `Strict` | Coexistence with non-FD frames. |
@@ -354,14 +369,20 @@ handling rules but does not manage a TCP/TLS stream.
 
 | Property | Default | Notes |
 | --- | --- | --- |
-| `P2Client` | `150 ms` | Initial response timeout. |
-| `P2ClientExtended` | `5 s` | After RC 0x78. |
+| `P2Client` | `150 ms` | Initial UDS response-start timeout. For DoCAN, P2 stops once the SF or FF arrives. |
+| `P2ClientExtended` | `5 s` | Response-start timeout after RC 0x78. DoCAN CF reassembly is governed by N_Cr/STmin/BS after FF. |
 | `Rc78Handling` | `WaitForCompletion` | Or `ReturnImmediately`. |
 | `Rc78CompletionTimeout` | `25 s` | Total budget while RC 0x78 retries. |
 | `Rc21Handling` | `ReturnImmediately` | Or `Retry`. |
 | `Rc21RetryInterval` | `200 ms` | Delay between retries. |
 | `WaitWhileSuppressingResponse` | `true` | Catch negative responses to suppressed requests. |
 | `StrictServiceIdMatching` | `false` | Discard mismatched responses silently. |
+| `ClearReceiveBufferBeforeRequest` | `true` | Drain pending receive payloads after acquiring the UDS request gate and before the first send. |
+| `InitializeOrClearUpAction` | `null` | Optional per-request lifecycle hook; `true` at transaction start, `false` during cleanup. |
+
+`ClearReceiveBufferBeforeRequest` and `InitializeOrClearUpAction` run once per
+`SendRequest` / `SendRequestAsync` call. Internal RC 0x21 retries reuse the same
+request transaction and do not re-enter the lifecycle hook.
 
 ## Building & testing
 
@@ -382,7 +403,7 @@ src/
     ├── DoIp/        # ISO 13400 stream/message transports
     ├── Exceptions/  # UdsException hierarchy
     ├── Internal/    # LinkedCts (timeout-aware cancellation linker)
-    ├── Services/    # Helpers for SID 0x10, 0x22, 0x27, 0x31, 0x3E, 0x19
+    ├── Services/    # Helpers for common ISO 14229 service IDs
     └── UdsLayer/    # UDS client/server/session/simulator
 tests/
 └── DiagKit.Uds.Tests/   # MSTest v4 suite

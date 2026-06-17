@@ -16,6 +16,7 @@ public sealed class UdsClient : IUdsClient
 {
     private readonly Action<ReadOnlyMemory<byte>, CancellationToken> _send;
     private readonly Func<CancellationToken, ReadOnlyMemory<byte>> _receive;
+    private readonly Func<CancellationToken, CancellationToken, ReadOnlyMemory<byte>>? _receiveWithResponseStart;
     private readonly Action? _clearBuffer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly UdsOptions _options;
@@ -35,9 +36,20 @@ public sealed class UdsClient : IUdsClient
         Func<CancellationToken, ReadOnlyMemory<byte>> receive,
         Action? clearReceiveBuffer = null,
         UdsOptions? options = null)
+        : this(send, receive, null, clearReceiveBuffer, options)
+    {
+    }
+
+    private UdsClient(
+        Action<ReadOnlyMemory<byte>, CancellationToken> send,
+        Func<CancellationToken, ReadOnlyMemory<byte>> receive,
+        Func<CancellationToken, CancellationToken, ReadOnlyMemory<byte>>? receiveWithResponseStart,
+        Action? clearReceiveBuffer,
+        UdsOptions? options)
     {
         _send = send ?? throw new ArgumentNullException(nameof(send));
         _receive = receive ?? throw new ArgumentNullException(nameof(receive));
+        _receiveWithResponseStart = receiveWithResponseStart;
         _clearBuffer = clearReceiveBuffer;
         _options = (options ?? new UdsOptions()).Clone();
         _options.Validate();
@@ -52,6 +64,9 @@ public sealed class UdsClient : IUdsClient
         : this(
             (data, ct) => transport.Send(data, ct),
             transport.Receive,
+            transport is IResponseStartAwareTransmitter<ReadOnlyMemory<byte>> responseStartAware
+                ? responseStartAware.Receive
+                : null,
             transport.ClearReceiveBuffer,
             options)
     {
@@ -67,12 +82,18 @@ public sealed class UdsClient : IUdsClient
         CancellationToken cancellationToken = default)
     {
         if (request.IsEmpty) throw new ArgumentException("Request is empty.", nameof(request));
+        byte[] reqCopy = request.ToArray();
         if (!_gate.Wait(0, cancellationToken))
             throw new InvalidOperationException("A UDS request is already in flight.");
+        var lifecycleStarted = false;
         try
         {
-            byte[] reqCopy = request.ToArray();
-            bool suppress = suppressResponse ?? UdsMessage.IsSuppressPositiveResponse(request.Span);
+            _options.InitializeOrClearUpAction?.Invoke(true);
+            lifecycleStarted = true;
+            if (_options.ClearReceiveBufferBeforeRequest)
+                _clearBuffer?.Invoke();
+
+            bool suppress = suppressResponse ?? UdsMessage.IsSuppressPositiveResponse(reqCopy);
             var overall = Stopwatch.StartNew();
 
             while (true)
@@ -88,7 +109,7 @@ public sealed class UdsClient : IUdsClient
                         ReadOnlyMemory<byte> maybeResponse;
                         try
                         {
-                            maybeResponse = _receive(cts.Token);
+                            maybeResponse = ReceiveWithResponseStart(cts.Token, cancellationToken);
                         }
                         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                         {
@@ -117,8 +138,7 @@ public sealed class UdsClient : IUdsClient
                 {
                     try
                     {
-                        using var cts = new LinkedCts(_options.P2Client, cancellationToken);
-                        response = _receive(cts.Token);
+                        response = ReceiveWithResponseStart(_options.P2Client, cancellationToken);
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
@@ -152,7 +172,18 @@ public sealed class UdsClient : IUdsClient
                 }
             }
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            try
+            {
+                if (lifecycleStarted)
+                    _options.InitializeOrClearUpAction?.Invoke(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
     }
 
     private ReadOnlyMemory<byte> WaitForFinalResponseAfterRc78(
@@ -165,16 +196,15 @@ public sealed class UdsClient : IUdsClient
 
         while (true)
         {
-            var wait = GetNextRc78Wait();
+            var wait = GetNextRc78Wait(out var boundedByCompletionTimeout);
             ReadOnlyMemory<byte> response;
             try
             {
-                using var cts = new LinkedCts(wait, cancellationToken);
-                response = _receive(cts.Token);
+                response = ReceiveWithResponseStart(wait, cancellationToken);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                if (overall.Elapsed >= _options.Rc78CompletionTimeout)
+                if (boundedByCompletionTimeout || overall.Elapsed >= _options.Rc78CompletionTimeout)
                     throw UdsClientResponseHandling.CreateRc78Exceeded(_options);
                 throw new ProtocolException($"Timeout waiting for final response after RC 0x78 (P2* = {_options.P2ClientExtended.TotalMilliseconds:F0} ms).");
             }
@@ -196,7 +226,20 @@ public sealed class UdsClient : IUdsClient
             return response;
         }
 
-        TimeSpan GetNextRc78Wait()
-            => UdsClientResponseHandling.GetNextRc78Wait(_options, overall);
+        TimeSpan GetNextRc78Wait(out bool boundedByCompletionTimeout)
+            => UdsClientResponseHandling.GetNextRc78Wait(_options, overall, out boundedByCompletionTimeout);
+    }
+
+    private ReadOnlyMemory<byte> ReceiveWithResponseStart(TimeSpan responseStartTimeout, CancellationToken cancellationToken)
+    {
+        using var cts = new LinkedCts(responseStartTimeout, cancellationToken);
+        return ReceiveWithResponseStart(cts.Token, cancellationToken);
+    }
+
+    private ReadOnlyMemory<byte> ReceiveWithResponseStart(CancellationToken responseStartCancellationToken, CancellationToken cancellationToken)
+    {
+        return _receiveWithResponseStart is not null
+            ? _receiveWithResponseStart(responseStartCancellationToken, cancellationToken)
+            : _receive(responseStartCancellationToken);
     }
 }
