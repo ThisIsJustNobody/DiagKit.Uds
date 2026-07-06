@@ -23,7 +23,7 @@ public static class CommunicationControl
     /// </summary>
     public static byte[] BuildRequest(
         CommunicationControlType controlType,
-        byte communicationType,
+        CommunicationType communicationType,
         ReadOnlySpan<byte> communicationControlRecord = default,
         bool suppressPositiveResponse = false)
     {
@@ -32,7 +32,7 @@ public static class CommunicationControl
         var buf = new byte[3 + communicationControlRecord.Length];
         buf[0] = (byte)UdsServiceId.CommunicationControl;
         buf[1] = sub;
-        buf[2] = communicationType;
+        buf[2] = (byte)communicationType;
         communicationControlRecord.CopyTo(buf.AsSpan(3));
         return buf;
     }
@@ -60,7 +60,7 @@ public static class CommunicationControl
     public static Task<Response> InvokeAsync(
         IAsyncUdsClient client,
         CommunicationControlType controlType,
-        byte communicationType,
+        CommunicationType communicationType,
         CancellationToken cancellationToken)
         => InvokeAsync(client, controlType, communicationType, default, cancellationToken);
 
@@ -70,7 +70,7 @@ public static class CommunicationControl
     public static async Task<Response> InvokeAsync(
         IAsyncUdsClient client,
         CommunicationControlType controlType,
-        byte communicationType,
+        CommunicationType communicationType,
         ReadOnlyMemory<byte> communicationControlRecord = default,
         CancellationToken cancellationToken = default)
     {
