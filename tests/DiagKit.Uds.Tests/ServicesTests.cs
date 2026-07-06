@@ -94,14 +94,14 @@ public class ServicesTests
 
         var request = CommunicationControl.BuildRequest(
             CommunicationControlType.DisableRxAndTx,
-            communicationType: 0x02,
+            communicationType: CommunicationType.Net,
             communicationControlRecord: [0x12, 0x34],
             suppressPositiveResponse: true);
         var response = CommunicationControl.ParseResponse([0x68, 0x03], CommunicationControlType.DisableRxAndTx);
         var invoked = await CommunicationControl.InvokeAsync(
             client,
             CommunicationControlType.DisableRxAndTx,
-            communicationType: 0x02,
+            communicationType: CommunicationType.Net,
             cancellationToken: TestContext.CancellationToken);
 
         CollectionAssert.AreEqual(new byte[] { 0x28, 0x83, 0x02, 0x12, 0x34 }, request);
@@ -124,7 +124,7 @@ public class ServicesTests
         var response = await CommunicationControl.InvokeAsync(
             client,
             CommunicationControlType.EnableRxAndTx,
-            communicationType: 0x01,
+            communicationType: CommunicationType.App,
             TestContext.CancellationToken);
 
         Assert.AreEqual(CommunicationControlType.EnableRxAndTx, response.ControlType);
